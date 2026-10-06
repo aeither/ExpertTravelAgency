@@ -1,0 +1,15 @@
+{
+  "flights": {
+    "slices": [{ "origin": "SIN", "destination": "BKK", "departure_date": "2026-11-10" }],
+    "passengers": [{ "type": "adult" }],
+    "max_connections": 0
+  },
+  "stays": {
+    "check_in_date": "2026-11-10",
+    "check_out_date": "2026-11-12",
+    "rooms": [{ "adults": 1 }],
+    "location": { "city": "Bangkok", "country_code": "TH" },
+    "currency": "USD",
+    "limit": 5
+  }
+}
