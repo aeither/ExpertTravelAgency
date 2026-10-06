@@ -181,3 +181,14 @@ test('advisor hotels are priced per night, ranked by price, and checkout failure
   const result = await advisor.checkout({ destination: 'Cebu', check_in: '2026-10-20', check_out: '2026-10-22', adults: 1, property_id: '1' });
   assert.equal(result.opened, false); assert.match(result.failure_reason!, /no offer/);
 });
+
+test('checkout sends the exact body the hotel agent documents, and a 400 names the bad field', async () => {
+  const config = advisorConfig({ ADVISOR_URL: 'https://advisor.test' });
+  let sent: any;
+  const ok = new Advisor(config, (async (_u: string, o: RequestInit) => { sent = JSON.parse(String(o.body)); return Response.json({ checkout: { trip_id: 'T1', checkout_url: 'https://pay.test/T1' } }); }) as typeof fetch);
+  const result = await ok.checkout({ destination: 'Boracay', check_in: '2026-10-13', check_out: '2026-10-15', adults: 2, property_id: '99' });
+  assert.deepEqual(sent, { destination: 'Boracay', check_in: '2026-10-13', check_out: '2026-10-15', adults: 2, payment_type: 'PAY_LATER', lodging: '', property_id: '99' });
+  assert.equal(result.opened, true);
+  const bad = new Advisor(config, (async () => Response.json({ detail: [{ loc: ['body', 'lodging'], msg: 'Field required' }] }, { status: 400 })) as typeof fetch);
+  assert.match((await bad.checkout({ destination: 'x', check_in: 'a', check_out: 'b', adults: 1, property_id: '1' })).failure_reason!, /lodging: Field required/);
+});

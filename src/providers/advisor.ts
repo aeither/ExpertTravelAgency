@@ -11,13 +11,16 @@ const price = (text: string | null | undefined) => {
   return { amount: Number(m[2]!.replace(/,/g, '')), currency };
 };
 
+// FastAPI validation errors arrive as a list of {loc, msg}: keep them readable so a 400 says which field is wrong.
+const detailText = (detail: unknown) => typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map((d: any) => [d?.loc?.slice(1).join('.'), d?.msg].filter(Boolean).join(': ')).join('; ') || undefined : undefined;
+
 export class Advisor {
   constructor(private config: Config, private request: typeof fetch = fetch) {}
   get enabled() { return !!this.config.ADVISOR_URL; }
   private async post(path: string, body: unknown) {
     const response = await this.request(this.config.ADVISOR_URL.replace(/\/$/, '') + path, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(90000), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const payload: any = await response.json().catch(() => ({}));
-    if (!response.ok) throw new ApiError(502, 'ADVISOR_FAILED', typeof payload.detail === 'string' ? payload.detail : `The hotel agent returned HTTP ${response.status}.`, undefined, response.status >= 500);
+    if (!response.ok) throw new ApiError(502, 'ADVISOR_FAILED', detailText(payload.detail) ?? `The hotel agent returned HTTP ${response.status}.`, undefined, response.status >= 500);
     return payload;
   }
   async searchStays(input: StaySearch) {
@@ -34,7 +37,7 @@ export class Advisor {
   // Opens checkout for one property. Returns what the agent said, whether or not it worked.
   async checkout(input: { destination: string; check_in: string; check_out: string; adults: number; property_id: string }) {
     try {
-      const result = await this.post('/hotels/book', input);
+      const result = await this.post('/hotels/book', { destination: input.destination, check_in: input.check_in, check_out: input.check_out, adults: input.adults, payment_type: 'PAY_LATER', lodging: '', property_id: input.property_id });
       const c = result.checkout ?? {};
       return { opened: !!(c.checkout_url || c.trip_id), trip_id: c.trip_id ?? null, checkout_url: c.checkout_url ?? null, total: c.total ?? null, failure_reason: c.failure_reason ?? null };
     } catch (error: any) {
