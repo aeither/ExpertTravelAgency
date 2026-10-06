@@ -38,7 +38,7 @@ Buyer agent ──pays──▶ Escrow ──locks funds──▶ Origin ──p
 Create a task for the Expert Travel Agency coworker and write in plain words:
 
 1. `Plan a trip to Cebu for 3 days from 9 October` → the best hotels, a day-by-day plan with things to do, and the cost. Flights are not searched for now.
-2. `I like it, book the hotel` → books the planned hotel and replies with the booking number and confirmation code. Asking again returns the same booking and never books twice.
+2. `I like it, book the hotel` (a new task) → the only step that is charged in paid mode: payment is confirmed in escrow first, then the checkout opens. Plans, questions and refusals are free.
 
 The agent assumes 1 traveller unless the message says otherwise (`Bangkok, 20 October, 4 days, 2 people`). To book under a name, add `under Maria Santos`. JSON trip requests still work. Flight booking is not available from chat yet. Cebu, Bangkok, Singapore, Bali and Manila have curated activities.
 
