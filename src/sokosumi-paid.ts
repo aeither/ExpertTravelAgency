@@ -30,6 +30,20 @@ export function purchasePayload(payment: any, nonce: string, config: Config) {
   };
 }
 
+const EXPLORER = 'https://preprod.cexplorer.io';
+const link = (label: string, tx: string | null | undefined) => tx ? `- ${label}: ${EXPLORER}/tx/${tx}` : undefined;
+// Plain text, so Sokosumi shows it as-is. Every link is public chain data a user can open without trusting us.
+export function proofBlock(paid: any, config: Config) {
+  const usdm = Number(config.MASUMI_PRICE_ATOMIC) / 1e6;
+  return ['', '---', `Payment proof (Cardano Preprod, real transactions, ${usdm} test USDM):`,
+    link('1. Your payment locked in escrow', paid.escrowTx), link('2. My result hash submitted on-chain', paid.resultTx),
+    '3. Seller payout: posted here as a comment once the escrow unlocks and is collected.',
+    `- Escrow contract: ${EXPLORER}/address/${paid.payment?.PaymentSource?.smartContractAddress}`,
+    `- Agent registration (policy): ${EXPLORER}/policy/${paid.payment?.PaymentSource?.policyId}`].filter(Boolean).join('\n');
+}
+export const collectionComment = (paid: any, config: Config) => ['Payout collected on-chain. The seller received the escrowed test USDM:', link('Seller payout transaction', paid.withdrawalTx),
+  `Anyone can check it: open the link and look for ${Number(config.MASUMI_PRICE_ATOMIC) / 1e6} USDM minus the protocol fee arriving at the seller address.`].filter(Boolean).join('\n');
+
 export type PaidDeps = {
   config: Config;
   // Calls the payment node (MPS). Throws on any failure.

@@ -4,7 +4,7 @@ import type { Travel } from './travel.js';
 import { ApiError } from './errors.js';
 import { TaskInputError } from './coworker-search.js';
 import { answerTask, answerFollowUp } from './planner.js';
-import { PaidFlow } from './sokosumi-paid.js';
+import { PaidFlow, proofBlock, collectionComment } from './sokosumi-paid.js';
 
 // One bounded invocation per request; persistent journal + Postgres session lock.
 export class Sokosumi {
@@ -90,14 +90,18 @@ export class Sokosumi {
         const paid = this.config.SOKOSUMI_PAID ? new PaidFlow({ config: this.config, mps: (p, b) => this.mps(p, b), event: (id, b) => this.api(`/v1/tasks/${id}/events`, b), save }) : undefined;
         // Completed paid tasks stay under watch until the node reports collection.
         if (state.phase === 'collecting') {
-          if (await paid!.collection(state) === 'settled') { state.phase = 'completed'; await save(); outcome = 'settled'; } else outcome = 'waiting';
+          if (await paid!.collection(state) === 'settled') {
+            // Tell the user where to verify the payout. Mark pending first so a crash never posts it twice.
+            if (!state.paid.proofPosted) { state.paid.proofPosted = 'pending'; await save(); await this.api(`/v1/tasks/${task.id}/events`, { comment: collectionComment(state.paid, this.config) }); state.paid.proofPosted = 'done'; }
+            state.phase = 'completed'; await save(); outcome = 'settled';
+          } else outcome = 'waiting';
           return;
         }
         if (state.phase === 'completed' || state.phase === 'blocked') { outcome = 'skipped'; return; }
         if (task.status === 'COMPLETED') {
           if (state.phase !== 'complete-pending') { outcome = 'skipped'; return; }
           const events = (await this.api(`/v1/tasks/${task.id}/events?limit=100`)).data;
-          if (events.some((e: any) => e.status === 'COMPLETED' && e.comment === state.answer && e.actor?.id === task.assigneeId)) { state.phase = paid ? 'collecting' : 'completed'; await save(); outcome = 'completed'; return; }
+          if (events.some((e: any) => e.status === 'COMPLETED' && e.comment === (state.final ?? state.answer) && e.actor?.id === task.assigneeId)) { state.phase = paid ? 'collecting' : 'completed'; await save(); outcome = 'completed'; return; }
           throw new ApiError(409, 'SOKOSUMI_UNCERTAIN', 'Completion does not match the saved answer. Operator inspection is required.');
         }
         if (state.phase === 'new' && task.status !== 'READY' && !(state.resumed && task.status === 'INPUT_REQUIRED')) { outcome = 'skipped'; return; }
@@ -141,10 +145,11 @@ export class Sokosumi {
         }
         if (state.phase === 'complete-pending') { outcome = 'inspection_required'; return; }
         if (paid && await paid.afterWork(task, state) === 'waiting') { outcome = 'waiting'; return; }
+        if (paid && !state.final) { state.final = state.answer + proofBlock(state.paid, this.config); await save(); }
         const latest = (await this.api(`/v1/tasks/${task.id}`)).data;
         if (latest.status !== 'RUNNING' || latest.description !== state.input || latest.assigneeId !== task.assigneeId) throw new ApiError(409, 'SOKOSUMI_TASK_CHANGED', 'Task changed before completion.');
         state.phase = 'complete-pending'; await save();
-        const event = (await this.api(`/v1/tasks/${task.id}/events`, { status: 'COMPLETED', comment: state.answer })).data;
+        const event = (await this.api(`/v1/tasks/${task.id}/events`, { status: 'COMPLETED', comment: state.final ?? state.answer })).data;
         if (event.status !== 'COMPLETED' || !event.id || event.taskId !== task.id) throw new ApiError(502, 'SOKOSUMI_COMPLETE_UNCERTAIN', 'Completion event was not confirmed.');
         state.phase = paid ? 'collecting' : 'completed'; state.eventId = event.id; await save(); outcome = 'completed';
       });

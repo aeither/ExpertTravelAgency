@@ -139,9 +139,13 @@ test('paid task waits for confirmed escrow, submits the result hash once, then t
     assert.equal(f.searches(), 1); assert.equal(calls.filter(c => c === '/payment/submit-result').length, 1);
     onChain = confirmed('ResultSubmitted', { resultHash: submitted });
     assert.equal((await tick()).status, 'completed');        // result confirmed on chain
+    const done = f.events.find(e => e.status === 'COMPLETED');
+    assert.match(done.comment, /preprod\.cexplorer\.io\/tx\/tx-FundsLocked/); assert.match(done.comment, /preprod\.cexplorer\.io\/tx\/tx-ResultSubmitted/);
     assert.equal(calls.filter(c => c === '/payment').length, 1); assert.equal(f.events.filter(e => e.masumiPayment).length, 1);
     onChain = confirmed('Withdrawn');
     assert.equal((await tick()).status, 'settled');
+    assert.match(f.events.at(-1).comment, /preprod\.cexplorer\.io\/tx\/tx-Withdrawn/);
+    assert.equal((await tick()).status, 'idle'); assert.equal(f.events.filter(e => /Payout collected/.test(e.comment ?? '')).length, 1);
     assert.equal(f.searches(), 1); assert.equal(calls.filter(c => c === '/payment/submit-result').length, 1);
   } finally { store.close(); }
 });
