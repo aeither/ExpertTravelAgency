@@ -26,6 +26,7 @@ export class PostgresStore implements Storage {
     if (!rows[0]) throw new ApiError(404, 'OPERATION_NOT_FOUND', 'Operation not found.');
     return rows[0];
   }
+  async find(key: string) { return (await this.pool.query<Operation>('SELECT * FROM operations WHERE key=$1', [key])).rows[0]; }
   async saveJob(job: any) { await this.pool.query('INSERT INTO jobs VALUES ($1,$2,$3,$4) ON CONFLICT(id) DO UPDATE SET data=excluded.data', [job.id, job.nonce, job.inputHash, JSON.stringify(job)]); }
   async job(id: string) { return (await this.pool.query('SELECT data FROM jobs WHERE id=$1', [id])).rows[0]?.data; }
   async jobByNonce(nonce: string) { return (await this.pool.query('SELECT data FROM jobs WHERE nonce=$1', [nonce])).rows[0]?.data; }

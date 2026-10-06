@@ -2,7 +2,8 @@ import type { Config } from './config.js';
 import type { Storage } from './store.js';
 import type { Travel } from './travel.js';
 import { ApiError } from './errors.js';
-import { runTravelTask, TaskInputError } from './coworker-search.js';
+import { TaskInputError } from './coworker-search.js';
+import { answerTask, answerFollowUp } from './planner.js';
 
 // One bounded invocation per request; persistent journal + Postgres session lock.
 export class Sokosumi {
@@ -33,7 +34,7 @@ export class Sokosumi {
       const page = await this.api(`/v1/tasks?${params}`);
       for (const task of page.data) {
         if (task.assigneeId !== me.id || !/^[a-f0-9-]{36}$/.test(task.id)) continue;
-        if (!['READY', 'RUNNING', 'COMPLETED'].includes(task.status)) continue;
+        if (!['READY', 'RUNNING', 'COMPLETED', 'INPUT_REQUIRED'].includes(task.status)) continue;
         if (task.runAt && new Date(task.runAt).getTime() > Date.now()) continue;
         const outcome = await this.advance(task);
         if (outcome !== 'skipped') return { status: outcome, execution_only: true };
@@ -44,6 +45,17 @@ export class Sokosumi {
     } while (cursor);
     return { status: 'idle', execution_only: true };
   }
+  // The traveller's answer to our last question: the newest user comment after it, or a new description set back to Ready.
+  private async reply(task: any, state: any): Promise<{ text: string; fromEdit?: boolean } | undefined> {
+    if (task.status === 'READY' && task.description !== state.input) return { text: task.description, fromEdit: true };
+    const events = (await this.api(`/v1/tasks/${task.id}/events?limit=100`)).data as any[];
+    const asked = events.filter(e => e.status === 'INPUT_REQUIRED' && e.actor?.id === task.assigneeId).map(e => String(e.createdAt ?? '')).sort().at(-1) ?? '';
+    const answers = events.filter(e => typeof e.comment === 'string' && e.comment.trim() && e.actor?.type === 'user' && String(e.createdAt ?? '') > asked && !state.used?.includes(e.id)).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+    const answer = answers.at(-1);
+    if (!answer) return undefined;
+    state.used = [...(state.used ?? []), answer.id];
+    return { text: answer.comment.trim() };
+  }
   private async advance(task: any) {
     const lockId = `sokosumi:${task.id}`;
     if (this.active.has(lockId)) return 'busy';
@@ -51,10 +63,19 @@ export class Sokosumi {
     let outcome = 'busy';
     try {
       await this.store.withJobLock(lockId, async () => {
-        const claim = await this.store.claim('sokosumi-task', lockId, { description: task.description, assigneeId: task.assigneeId, organizationId: task.organizationId });
+        // The journal is keyed by task, not by its text, so a traveller can edit the description and carry on. Older journals are found by key.
+        const found = await this.store.find(lockId);
+        const claim = found ? { operation: found, fresh: false } : await this.store.claim('sokosumi-task', lockId, { assigneeId: task.assigneeId, organizationId: task.organizationId });
         const op = claim.operation!;
         let state = op.response ?? { phase: 'new', input: task.description };
         const save = async () => this.store.finish(op.id, state.phase, state);
+        // A task we have never worked on that is already waiting for input belongs to someone else.
+        if (claim.fresh && task.status === 'INPUT_REQUIRED') { state = { phase: 'blocked', reason: 'NOT_OURS', input: task.description }; await save(); outcome = 'skipped'; return; }
+        // The traveller answered our question (a reply on the task, or an edited description set back to Ready): continue the same task.
+        if (state.phase === 'blocked' && state.reason === 'INPUT_REQUIRED' && ['READY', 'INPUT_REQUIRED'].includes(task.status)) {
+          const reply = await this.reply(task, state);
+          if (reply !== undefined) { state = { phase: 'new', input: task.description, resumed: true, ...(state.used ? { used: state.used } : {}), ...(reply.fromEdit ? {} : { reply: reply.text, ...(state.context ? { context: state.context } : {}) }) }; await save(); }
+        }
         if (state.phase === 'completed' || state.phase === 'blocked') { outcome = 'skipped'; return; }
         if (task.status === 'COMPLETED') {
           if (state.phase !== 'complete-pending') { outcome = 'skipped'; return; }
@@ -62,16 +83,16 @@ export class Sokosumi {
           if (events.some((e: any) => e.status === 'COMPLETED' && e.comment === state.answer && e.actor?.id === task.assigneeId)) { state.phase = 'completed'; await save(); outcome = 'completed'; return; }
           throw new ApiError(409, 'SOKOSUMI_UNCERTAIN', 'Completion does not match the saved answer. Operator inspection is required.');
         }
-        if (state.phase === 'new' && task.status !== 'READY') { outcome = 'skipped'; return; }
+        if (state.phase === 'new' && task.status !== 'READY' && !(state.resumed && task.status === 'INPUT_REQUIRED')) { outcome = 'skipped'; return; }
         // Read the authoritative task immediately before changing it.
         const current = (await this.api(`/v1/tasks/${task.id}`)).data;
-        if (current.assigneeId !== task.assigneeId || current.description !== state.input || !['READY', 'RUNNING'].includes(current.status)) throw new ApiError(409, 'SOKOSUMI_TASK_CHANGED', 'Task changed before execution.');
+        if (current.assigneeId !== task.assigneeId || current.description !== state.input || !(['READY', 'RUNNING'].includes(current.status) || (state.resumed && current.status === 'INPUT_REQUIRED'))) throw new ApiError(409, 'SOKOSUMI_TASK_CHANGED', 'Task changed before execution.');
         if (current.organizationId === null) {
           const personal = (await this.api(`/v1/workspaces/${current.workspace.id}`, undefined, current.ownerId)).data;
           if (personal.organizationId !== null) throw new ApiError(403, 'SOKOSUMI_WORKSPACE_ERROR', 'Personal Workspace authorization failed.');
         }
         if (state.phase === 'new') {
-          if (current.status !== 'READY') { outcome = 'skipped'; return; }
+          if (current.status !== 'READY' && !(state.resumed && current.status === 'INPUT_REQUIRED')) { outcome = 'skipped'; return; }
           state.phase = 'start-pending'; await save();
           // Core enforces Vendor Workspace access on the event write.
           const started = (await this.api(`/v1/tasks/${task.id}/events`, { status: 'RUNNING' })).data;
@@ -84,12 +105,16 @@ export class Sokosumi {
         }
         if (state.phase === 'searching') {
           try {
-            const output = await runTravelTask(state.input ?? '', 'https://origin-travel-agent.vercel.app', (async (_url, options) => Response.json(await this.travel.trip(JSON.parse(String(options?.body))))) as typeof fetch);
-            state = { ...state, phase: 'result-saved', answer: output.answer, summary: output.result.summary }; await save();
+            const deps = { travel: this.travel, store: this.store, config: this.config }, owner = String(current.ownerId ?? current.organizationId ?? 'anonymous'), url = 'https://origin-travel-agent.vercel.app';
+            const earlier = [state.input, state.context].filter(Boolean).join(' ');
+            const output = state.reply !== undefined ? await answerFollowUp(earlier, state.reply, deps, owner, url) : await answerTask(earlier, deps, owner, url);
+            state = { ...state, phase: 'result-saved', answer: output.answer, summary: output.summary }; await save();
           } catch (error) {
             const status = error instanceof TaskInputError ? 'INPUT_REQUIRED' : 'FAILED';
-            const comment = error instanceof TaskInputError ? error.message : 'Supplier search failed. No booking or payment was made. Ask the operator to inspect before retrying.';
-            state.phase = 'blocked'; state.reason = status; await save();
+            const comment = error instanceof TaskInputError ? error.message : 'Sorry, I could not finish this. Please try again in a minute. If a booking was in progress, ask the team to check it first.';
+            // Keep what the traveller already told us, so the next answer only has to add what is still missing.
+            if (state.reply !== undefined && status === 'INPUT_REQUIRED') state.context = [state.context, state.reply].filter(Boolean).join(' ');
+            delete state.reply; state.phase = 'blocked'; state.reason = status; await save();
             await this.api(`/v1/tasks/${task.id}/events`, { status, comment });
             outcome = status.toLowerCase(); return;
           }

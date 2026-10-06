@@ -7,7 +7,7 @@ import type { Travel } from '../src/travel.js';
 
 const coworker = '01a11100-48ed-74a7-b050-f616bc9751d6';
 const id = '01a11103-ed45-7068-b0c6-2ffc923a8fd7';
-const config = getConfig({ SOKOSUMI_COWORKER_ID: coworker, SOKOSUMI_COWORKER_API_KEY: 'coworker_test_runtime_secret' });
+const config = getConfig({ FLIGHTS_ENABLED: 'true', SOKOSUMI_COWORKER_ID: coworker, SOKOSUMI_COWORKER_API_KEY: 'coworker_test_runtime_secret' });
 function fixture(failCompletion = false, invalid = false) {
   const task: any = { id, assigneeId: coworker, organizationId: null, ownerId: 'owner', workspace: { id: 'workspace' }, status: 'READY', description: invalid ? 'Find flights' : JSON.stringify({ flights: { slices: [{ origin: 'SIN', destination: 'BKK', departure_date: '2099-11-10' }], passengers: [{ type: 'adult' }] } }) };
   const events: any[] = [];
@@ -52,5 +52,63 @@ test('invalid task input requests clarification without querying suppliers', asy
   try {
     assert.equal((await new Sokosumi(config, store, f.travel, f.request).tick()).status, 'input_required');
     assert.equal(f.task.status, 'INPUT_REQUIRED'); assert.equal(f.searches(), 0);
+  } finally { store.close(); }
+});
+
+// A task the traveller can answer: the fixture records comments as user events with timestamps.
+function conversation(description: string) {
+  const f = fixture(false, false);
+  f.task.description = description;
+  const hotel = { id: 'h1', name: 'Test Hotel', stars: 3, rating: 9, cheapest_total: { amount: '80.00', currency: 'EUR' }, rooms: [{ offer_id: 'offer', board: 'Room only', refundable: true, total: { amount: '80.00', currency: 'EUR' } }] };
+  f.travel.stays = (async () => ({ data: { hotels: [hotel] } })) as any;
+  let clock = 0; const stamp = () => new Date(Date.UTC(2026, 9, 6, 12, 0, clock++)).toISOString();
+  const post = f.request;
+  const request = (async (url: string, options: RequestInit) => {
+    const response = await post(url, options);
+    if (url.includes(`/tasks/${id}/events`) && options.method !== 'GET') { const data = await response.clone().json(); data.data.createdAt = stamp(); f.events[f.events.length - 1].createdAt = data.data.createdAt; return Response.json(data); }
+    return response;
+  }) as typeof fetch;
+  const userSays = (comment: string) => f.events.push({ id: `user-${f.events.length}`, taskId: id, status: f.task.status, comment, createdAt: stamp(), actor: { type: 'user', id: 'owner' } });
+  return { ...f, request, userSays };
+}
+const asked = (e: any) => e.status === 'INPUT_REQUIRED' && e.actor?.id === coworker;
+
+test('a reply on an INPUT_REQUIRED task continues the same task instead of staying blocked', async () => {
+  const store = new Store(':memory:'); const f = conversation('Plan a trip to Cebu for 3 days');
+  try {
+    const run = () => new Sokosumi(config, store, f.travel, f.request).tick();
+    assert.equal((await run()).status, 'input_required'); assert.equal(f.task.status, 'INPUT_REQUIRED');
+    assert.match(f.events.find(asked).comment, /Which day/);
+    assert.equal((await run()).status, 'idle');                          // nobody answered yet: nothing happens, nothing repeats
+    assert.equal(f.events.filter(asked).length, 1);
+    f.userSays('soon');                                                   // an unusable answer asks again, with what we already know kept
+    assert.equal((await run()).status, 'input_required');
+    assert.equal(f.events.filter(asked).length, 2);
+    f.userSays('from 9 November');
+    assert.equal((await run()).status, 'completed'); assert.equal(f.task.status, 'COMPLETED');
+    assert.match(f.events.at(-1).comment, /Your 3-day trip to Cebu/); assert.match(f.events.at(-1).comment, /Mon 9 Nov/);
+    assert.equal((await run()).status, 'idle');
+  } finally { store.close(); }
+});
+
+test('an edited description set back to Ready resumes; an unchanged one does not loop', async () => {
+  const store = new Store(':memory:'); const f = conversation('hmm'); const g = conversation('Plan a trip to Cebu'); const other = new Store(':memory:');
+  try {
+    assert.equal((await new Sokosumi(config, store, f.travel, f.request).tick()).status, 'completed');   // "hmm" is not a trip: it is redirected, not left waiting
+    const go = () => new Sokosumi(config, other, g.travel, g.request).tick();
+    assert.equal((await go()).status, 'input_required');
+    g.task.status = 'READY';
+    assert.equal((await go()).status, 'idle'); assert.equal(g.events.filter(asked).length, 1);   // same text, set to Ready: no loop
+    g.task.description = 'Plan a trip to Cebu for 3 days from 9 November';
+    assert.equal((await go()).status, 'completed');
+  } finally { store.close(); other.close(); }
+});
+
+test('a task that was already waiting for input before we saw it is left alone', async () => {
+  const store = new Store(':memory:'); const f = conversation('Plan a trip to Cebu from 9 November');
+  try {
+    f.task.status = 'INPUT_REQUIRED'; f.userSays('hello');
+    assert.equal((await new Sokosumi(config, store, f.travel, f.request).tick()).status, 'idle');
+    assert.equal(f.events.length, 1);
   } finally { store.close(); }
 });

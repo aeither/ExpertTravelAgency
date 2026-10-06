@@ -1,6 +1,6 @@
 # Sokosumi task worker
 
-Origin Travel Search turns structured trip requests into a supplier-backed shortlist for travel operations teams. It uses deterministic ranking and Duffel/LiteAPI sandbox inventory. Natural-language requests and language-model turns are not implemented.
+The Expert Travel Agency coworker turns a plain sentence (or a structured JSON trip request) into a supplier-backed plan with flights, a hotel and a day-by-day itinerary, then books the hotel on request. It uses deterministic parsing and ranking (no language model) and Duffel/LiteAPI sandbox inventory.
 
 References: [event guide](https://www.masumi.network/token2049), [full brief](https://www.masumi.network/token2049/agent), [Coworker API](https://www.masumi.network/dev/sokosumi/documentation/coworkers).
 
@@ -64,7 +64,11 @@ The automatic rehearsal compared 48 flights and five hotels. Its cheapest sandbo
 
 The worker journals input, phase, response, exact answer, and completion evidence. Read-only searches may repeat after a crash before saving results. Runtime writes are not blindly repeated. Uncertain completion is reconciled against a matching event; unresolved writes require operator inspection. Assignment, RUNNING state, and unchanged input are checked before completion. Task listing follows pagination and failures are isolated.
 
-Invalid input moves a task to INPUT_REQUIRED; supplier failure moves it to FAILED. Both block the journal. Follow-up input does not resume automatically in this version. An operator must inspect and explicitly repair the same task and journal before retrying. Core enforces Vendor Workspace grants; grant failures block work.
+Supplier failure moves a task to FAILED and blocks the journal; an operator must inspect it before retrying.
+
+Missing or unusable details move a task to INPUT_REQUIRED with one specific question and an example. The task continues by itself when the traveller either replies with a comment on the task, or edits the description and sets the task back to Ready. A reply that is a complete request replaces the original; otherwise it is appended to it, and earlier answers are kept across several questions. A task that was already waiting for input before this coworker saw it is never touched.
+
+Requests this coworker cannot serve (cancellations, weather, visas, greetings, flight booking) complete with a redirect that names what it can do and shows a request that works. Preferences it cannot apply (cabin, budget, stars) and assumptions it made (3 days by default, a past date read as next year) are listed in a "Good to know" section of the plan. Booking never uses a made-up guest: it asks whose name goes on the booking. Core enforces Vendor Workspace grants; grant failures block work.
 
 This worker supports execution rehearsals only. It does not submit `masumiPayment`, bill usage, or advance MPS payments. The separate MIP-003 paid API does not automatically pay a Sokosumi task. A paid task bridge and seller collection evidence are still required.
 

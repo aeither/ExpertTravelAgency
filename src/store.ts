@@ -15,6 +15,7 @@ export interface Storage {
   claim(kind: string, key: string, input: unknown): { operation: Operation; fresh: boolean } | Promise<{ operation: Operation; fresh: boolean }>;
   finish(id: string, state: string, response: unknown): void | Promise<void>;
   get(id: string): Operation | Promise<Operation>;
+  find(key: string): Operation | undefined | Promise<Operation | undefined>;
   saveJob(job: any): void | Promise<void>;
   job(id: string): any;
   jobByNonce(nonce: string): any;
@@ -46,6 +47,10 @@ export class Store {
     const row = this.db.prepare('SELECT * FROM operations WHERE id = ?').get(id) as any;
     if (!row) throw new ApiError(404, 'OPERATION_NOT_FOUND', 'Operation not found.');
     return this.decode(row);
+  }
+  find(key: string): Operation | undefined {
+    const row = this.db.prepare('SELECT * FROM operations WHERE key = ?').get(key);
+    return row ? this.decode(row) : undefined;
   }
   private decode(row: any): Operation { return { ...row, response: JSON.parse(row.response) }; }
   saveJob(job: any) { this.db.prepare('INSERT INTO jobs VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data').run(job.id, job.nonce, job.inputHash, JSON.stringify(job)); }

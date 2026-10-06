@@ -16,6 +16,7 @@ import * as s from './schemas.js';
 import { demoHtml } from './demo-ui.js';
 import { withSearchExamples } from './openapi-examples.js';
 import { Sokosumi } from './sokosumi.js';
+import { journaledBooking } from './journal.js';
 import { coworkerHtml } from './coworker-ui.js';
 
 export async function buildApp(config: Config, options: { fetch?: Fetch; poll?: boolean; logger?: boolean } = {}) {
@@ -75,24 +76,7 @@ export async function buildApp(config: Config, options: { fetch?: Fetch; poll?: 
   app.get('/v1/flights/offers/:id', { schema: { ...tag('Flights', 'Refresh a flight offer'), params: idParams } }, r => travel.offer(r.params.id));
   app.post('/v1/stays/search', { schema: { ...tag('Stays', 'Search hotels with live room rates'), body: s.staySearch } }, r => travel.stays(r.body));
   app.post('/v1/trips/search', { schema: { ...tag('Trips', 'Search travel categories in parallel'), body: s.tripSearch } }, r => travel.trip(r.body));
-  const book = async (kind: string, key: string, input: unknown, action: (id: string, submitted: () => Promise<void>) => Promise<unknown>) => {
-    const claimed = await store.claim(kind, key, { mode: config.TRAVEL_MODE, duffel_mode: config.DUFFEL_ACCESS_TOKEN.startsWith('duffel_live_') ? 'production' : 'sandbox', input });
-    const op = claimed.operation;
-    if (!claimed.fresh) {
-      if (op.state === 'succeeded') return { operation_id: op.id, replayed: true, ...op.response };
-      throw new ApiError(409, 'OPERATION_REQUIRES_INSPECTION', 'This operation already exists. Inspect it before creating another booking.', { operation_id: op.id, state: op.state });
-    }
-    let submitted = false;
-    try {
-      const result = await action(op.id, async () => { submitted = true; await store.finish(op.id, 'submitted', null); });
-      await store.finish(op.id, 'succeeded', result);
-      return { operation_id: op.id, replayed: false, ...result as object };
-    } catch (error: any) {
-      const state = submitted && (error.uncertain || !(error instanceof ApiError)) ? 'uncertain' : 'failed';
-      await store.finish(op.id, state, { error: { code: error.code ?? 'INTERNAL_ERROR' } });
-      throw new ApiError(error.statusCode ?? 500, error.code ?? 'INTERNAL_ERROR', error.code ? error.message : 'Booking failed.', { operation_id: op.id, state, ...(error.details ?? {}) });
-    }
-  };
+  const book = (kind: string, key: string, input: unknown, action: (id: string, submitted: () => Promise<void>) => Promise<unknown>) => journaledBooking(store, config, kind, key, input, action);
   app.post('/v1/flights/bookings', { schema: { ...tag('Flights', 'Book a refreshed flight offer'), headers: s.idempotencyHeaders, body: s.flightBooking } }, r => book('flight', r.headers['idempotency-key'], r.body, (id, submitted) => travel.bookFlight(r.body, id, submitted)));
   app.get('/v1/stays/hotels/:id', { schema: { ...tag('Stays', 'Get hotel photos, facilities, and review highlights'), params: idParams } }, r => travel.hotel(r.params.id));
   app.post('/v1/stays/bookings', { schema: { ...tag('Stays', 'Book a hotel offer within a budget'), headers: s.idempotencyHeaders, body: s.stayBooking } }, r => book('stay', r.headers['idempotency-key'], r.body, (id, submitted) => travel.bookStay(r.body, id, submitted)));

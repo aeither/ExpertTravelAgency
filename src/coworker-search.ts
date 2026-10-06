@@ -7,7 +7,7 @@ export function parseTravelTask(description: string) {
   const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/.exec(trimmed);
   let value: unknown;
   try { value = JSON.parse(fenced ? fenced[1]! : trimmed); }
-  catch { throw new TaskInputError('Paste a JSON trip request with flights and/or stays. See the sample in the Coworker run instructions.'); }
+  catch { throw new TaskInputError('That looks like JSON, but I could not read it. Fix the JSON, or just describe your trip in words, for example: "Plan a trip to Cebu for 3 days from 9 November". Reply on this task, or create a new task, with the fix.'); }
   const parsed = tripSearch.safeParse(value);
   if (!parsed.success) throw new TaskInputError(parsed.error.issues.map(i => `${i.path.join('.') || 'request'}: ${i.message}`).join('\n'));
   return parsed.data;
@@ -21,26 +21,32 @@ export async function runTravelTask(description: string, baseUrl: string, reques
   if (!response.ok) throw new Error(`Travel search HTTP ${response.status}`);
   const result: any = await response.json();
   if (!result.complete || !result.results || !result.summary) throw new Error('Supplier search was incomplete; no successful shortlist can be delivered.');
-  const lines = ['# Origin travel shortlist', '', `Observed: ${result.observed_at}`, ''];
-  for (const [kind, part] of Object.entries(result.results) as [string, any][]) {
-    lines.push(`${kind}: ${part.provider} / ${part.environment}`);
-  }
-  lines.push('', 'Sandbox and demo results are test inventory. Refresh the selected offer before any booking.');
+  const money = (t: any) => `${t.amount} ${t.currency}`;
+  const duration = (m: unknown) => typeof m === 'number' ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : 'unknown length';
+  const when = (iso: string) => Number.isNaN(Date.parse(iso + 'Z')) ? iso : new Date(iso + 'Z').toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+  const stops = (n: number) => n === 0 ? 'direct' : n === 1 ? '1 stop' : `${n} stops`;
+  const lines = ['# Your trip options', ''];
   const flight = result.summary.flights;
-  if (flight) {
-    lines.push('', `Compared ${flight.offers_found} flight offers.`);
-    for (const label of ['cheapest', 'fastest']) {
-      const option = flight[label];
-      if (option) lines.push(`- ${label}: ${option.airline}, ${option.route}, ${option.total.amount} ${option.total.currency}, ${option.duration_minutes ?? 'unknown'} minutes, ${option.stops} stops. Departs ${option.departs_at}. Offer: ${option.offer_id}.`);
-    }
-  }
   const hotels = result.summary.hotels;
-  if (hotels) {
-    lines.push('', `Compared ${hotels.hotels_found} hotels.`);
-    if (hotels.cheapest) lines.push(`- Cheapest: ${hotels.cheapest.name}, ${hotels.cheapest.total.amount} ${hotels.cheapest.total.currency}.`);
-    for (const hotel of hotels.top_rated ?? []) lines.push(`- ${hotel.name}: rating ${hotel.rating ?? 'unknown'}, ${hotel.total.amount} ${hotel.total.currency}, refundable: ${hotel.refundable}.`);
+  if (flight) {
+    lines.push('## Flights', '');
+    const { cheapest, fastest } = flight;
+    if (cheapest) lines.push(`- **Cheapest:** ${cheapest.airline}, ${cheapest.route}, ${money(cheapest.total)}. ${stops(cheapest.stops)}, ${duration(cheapest.duration_minutes)}. Leaves ${when(cheapest.departs_at)}.`);
+    if (fastest && fastest.offer_id !== cheapest?.offer_id) lines.push(`- **Fastest:** ${fastest.airline}, ${fastest.route}, ${money(fastest.total)}. ${stops(fastest.stops)}, ${duration(fastest.duration_minutes)}. Leaves ${when(fastest.departs_at)}.`);
+    lines.push('');
   }
-  if (result.summary.estimated_total) lines.push('', `Combined estimate: ${JSON.stringify(result.summary.estimated_total)}`);
-  lines.push('', 'Prices are compared within the supplier response; no currency conversion is applied. This task performs search only.', '', `API documentation: ${baseUrl.replace(/\/$/, '')}/docs`, '', 'Exact search summary:', '```json', JSON.stringify(result.summary, null, 2), '```');
+  if (hotels) {
+    lines.push('## Hotels', '');
+    if (hotels.cheapest) lines.push(`- **Cheapest:** ${hotels.cheapest.name}, ${money(hotels.cheapest.total)}.`);
+    for (const hotel of hotels.top_rated ?? []) lines.push(`- **Best rated:** ${hotel.name}, ${hotel.rating ?? 'no'}/10, ${money(hotel.total)}. ${hotel.refundable ? 'Free cancellation.' : 'Not refundable.'}`);
+    lines.push('');
+  }
+  const total = result.summary.estimated_total;
+  if (total?.amount) lines.push(`**Rough total (cheapest flight + cheapest hotel): ${money(total)}**`, '');
+  else if (total) lines.push('**Rough total:** the flight and hotel prices are in different currencies, so we did not add them up (no currency conversion).', '');
+  lines.push('_These are practice prices for testing, not real bookings. Nothing has been booked or paid. Ask us to book your favourite and we will check the price again first._', '', '<details><summary>Booking codes</summary>', '');
+  if (flight?.cheapest) lines.push(`Cheapest flight: ${flight.cheapest.offer_id}`);
+  if (flight?.fastest) lines.push(`Fastest flight: ${flight.fastest.offer_id}`);
+  lines.push('', '</details>', '');
   return { input, result, answer: lines.join('\n') + '\n' };
 }

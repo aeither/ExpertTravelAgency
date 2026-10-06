@@ -19,8 +19,9 @@ test('shortlist preserves supplier prices, environment, identifiers, and currenc
     return Response.json(fixture);
   }) as typeof fetch);
   assert.match(output.answer, /79.76 EUR/);
-  assert.match(output.answer, /duffel \/ sandbox/);
+  assert.match(output.answer, /Cheapest/);
+  assert.doesNotMatch(output.answer, /sandbox|JSON|\{/);
   assert.match(output.answer, /off_123/);
-  assert.match(output.answer, /no currency conversion/);
+  assert.match(output.answer, /Nothing has been booked/);
   assert.deepEqual(output.result, fixture);
 });
