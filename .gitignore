@@ -18,3 +18,4 @@ docs/sources/
 .env*
 !.env.example
 codex-session-*.md
+.DS_Store
