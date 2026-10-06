@@ -161,7 +161,7 @@ export interface Plan {
 
 const hotelOf = (h: any, nights: number): Plan['hotel'] => ({ id: h.id, name: h.name, rating: h.rating ?? null, stars: h.stars ?? null, total: h.cheapest_total, refundable: !!h.rooms[0].refundable, board: h.rooms[0].board ?? null, nights, offer_id: h.rooms[0].offer_id, url: h.url ?? null, ...(h.lodging !== undefined ? { lodging: h.lodging } : {}) });
 
-export async function buildPlan(request: TripRequest, travel: Travel, fee?: string): Promise<{ plan: Plan; answer: string }> {
+export async function buildPlan(request: TripRequest, travel: Travel, fee?: string, preferId?: string): Promise<{ plan: Plan; answer: string }> {
   const { destination, start, days, travellers } = request;
   const end = addDays(start, days - 1), nights = days - 1;
   const currency = 'USD';
@@ -170,6 +170,9 @@ export async function buildPlan(request: TripRequest, travel: Travel, fee?: stri
   if (!hotels.length) throw new TaskInputError(`I could not find an available hotel in ${destination.name} for ${prettyDate(start)} to ${prettyDate(end)}. Please try other dates.${ASK_AGAIN}`);
   const good = hotels.filter(h => (Number(h.rating) || 0) >= 7.5);
   const ranked = [...(good.length ? good : hotels)].sort((a, b) => value(b, nights) - value(a, nights));
+  // The agent may choose a hotel itself: that hotel goes first, the rest stay as fallbacks for the checkout.
+  const chosen = ranked.findIndex(h => h.id === preferId);
+  if (chosen > 0) ranked.unshift(...ranked.splice(chosen, 1));
   const top = ranked[0], room = top.rooms[0];
   const plan: Plan = {
     id: 'TRIP-' + Math.random().toString(16).slice(2, 8).toUpperCase(), request, end, currency, attempt: 1,
@@ -233,7 +236,7 @@ function planAnswer(plan: Plan, fee?: string) {
 
 // Search again with the plan's own dates and group, then open a checkout: the top pick first, then the next
 // candidates, because the hotel agent cannot open an offer for every stay it lists. The first one that opens wins.
-async function openCheckout(deps: Deps, plan: Plan): Promise<{ opened: boolean; failure_reason: string | null }> {
+export async function openCheckout(deps: Deps, plan: Plan): Promise<{ opened: boolean; failure_reason: string | null }> {
   const { request } = plan;
   const fresh: any = await deps.travel.stays({ check_in_date: request.start, check_out_date: plan.end, rooms: [{ adults: request.travellers }], location: { city: request.destination.city, country_code: request.destination.country_code }, currency: plan.currency, guest_nationality: 'US', limit: 20 });
   const listed = new Map<string, any>((fresh.data.hotels ?? []).map((h: any) => [h.id, h]));
@@ -258,9 +261,16 @@ export async function savePlan(deps: Deps, owner: string, plan: Plan) {
   const op = (await deps.store.claim('latest-plan', planKey(owner), { owner })).operation;
   await deps.store.finish(op.id, 'ready', plan);
 }
-async function loadPlan(deps: Deps, owner: string): Promise<{ id: string; plan?: Plan }> {
+export async function loadPlan(deps: Deps, owner: string): Promise<{ id: string; plan?: Plan }> {
   const op = (await deps.store.claim('latest-plan', planKey(owner), { owner })).operation;
   return { id: op.id, plan: op.state === 'ready' ? op.response : undefined };
+}
+
+// After the payment is confirmed: hand over the checkout that was opened (and saved) before the charge.
+export async function completeCheckout(deps: Deps, owner: string): Promise<string> {
+  const { plan } = await loadPlan(deps, owner);
+  if (!plan?.checkout) throw new ApiError(409, 'NO_CHECKOUT', 'No checkout was prepared for this booking.');
+  return await checkoutViaAdvisor(deps, owner, plan, []);
 }
 
 export async function bookHotel(deps: Deps, owner: string, intent: Extract<Intent, { kind: 'book' }>, today = new Date()): Promise<string> {

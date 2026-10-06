@@ -1,15 +1,17 @@
 import type { Config } from './config.js';
 import type { Storage } from './store.js';
 import type { Travel } from './travel.js';
+import type { LanguageModel } from 'ai';
 import { ApiError } from './errors.js';
 import { TaskInputError } from './coworker-search.js';
-import { answerTask, answerFollowUp, needsPayment } from './planner.js';
+import { answerTask, answerFollowUp, needsPayment, completeCheckout } from './planner.js';
+import { agentEnabled, runAgent, type Decision } from './agent.js';
 import { PaidFlow, proofBlock, collectionComment } from './sokosumi-paid.js';
 
 // One bounded invocation per request; persistent journal + Postgres session lock.
 export class Sokosumi {
   private active = new Set<string>();
-  constructor(private config: Config, private store: Storage, private travel: Travel, private request: typeof fetch = fetch) {}
+  constructor(private config: Config, private store: Storage, private travel: Travel, private request: typeof fetch = fetch, private model?: LanguageModel) {}
   get configured() { return !!this.config.SOKOSUMI_COWORKER_ID && this.config.SOKOSUMI_COWORKER_API_KEY.startsWith('coworker_'); }
   private async api(path: string, body?: unknown, ownerId?: string) {
     const response = await this.request('https://api.preprod.sokosumi.com' + path, {
@@ -126,8 +128,22 @@ export class Sokosumi {
           state.phase = 'searching'; await save();
         }
         const owner = String(current.ownerId ?? current.organizationId ?? 'anonymous');
+        const deps = { travel: this.travel, store: this.store, config: this.config, get charged() { return !!paid; } };
+        // The AI agent reads the request first. It only ever decides: answer, ask, or "the traveller confirmed a booking".
+        // If the model is unavailable the deterministic planner answers, so a task never fails just because of the model.
+        const useAgent = agentEnabled(this.config) && this.travel.usesAdvisor;
+        const decide = async () => {
+          if (!useAgent || state.decision) return;
+          const earlier = [state.input, state.context].filter(Boolean).join(' ');
+          const text = state.reply !== undefined ? `Original request: ${earlier}\nTraveller's reply to my question: ${state.reply}` : earlier;
+          try { state.decision = await runAgent(text, deps, owner, { model: this.model }); }
+          catch (error) { console.error('agent failed, using the planner:', String((error as Error)?.message ?? error).slice(0, 200)); state.decision = { kind: 'fallback' }; }
+          await save();
+        };
         if (state.phase === 'searching' && paid && state.charged === undefined && !state.paid) {
-          state.charged = await needsPayment({ travel: this.travel, store: this.store, config: this.config }, owner, [state.input, state.context].filter(Boolean).join(' '), state.reply);
+          await decide();
+          const d: Decision | { kind: 'fallback' } | undefined = state.decision;
+          state.charged = d && d.kind !== 'fallback' ? d.kind === 'book' : await needsPayment(deps, owner, [state.input, state.context].filter(Boolean).join(' '), state.reply);
           await save();
           if (!state.charged) paid = undefined;
         }
@@ -136,16 +152,21 @@ export class Sokosumi {
         }
         if (state.phase === 'searching') {
           try {
-            const deps = { travel: this.travel, store: this.store, config: this.config, charged: !!paid }, url = 'https://origin-travel-agent.vercel.app';
+            const url = 'https://origin-travel-agent.vercel.app';
             const earlier = [state.input, state.context].filter(Boolean).join(' ');
-            const output = state.reply !== undefined ? await answerFollowUp(earlier, state.reply, deps, owner, url) : await answerTask(earlier, deps, owner, url);
+            await decide();
+            const d: Decision | { kind: 'fallback' } | undefined = state.decision;
+            if (d?.kind === 'ask') throw new TaskInputError(d.text);
+            const output = d?.kind === 'answer' ? { answer: d.text, summary: { action: 'plan', ...(d.trip_code ? { trip_code: d.trip_code } : {}), by: 'agent' } }
+              : d?.kind === 'book' ? { answer: await completeCheckout(deps, owner), summary: { action: 'book', by: 'agent' } }
+              : state.reply !== undefined ? await answerFollowUp(earlier, state.reply, deps, owner, url) : await answerTask(earlier, deps, owner, url);
             state = { ...state, phase: 'result-saved', answer: output.answer, summary: output.summary }; await save();
           } catch (error) {
             const status = error instanceof TaskInputError ? 'INPUT_REQUIRED' : 'FAILED';
             const comment = error instanceof TaskInputError ? error.message : 'Sorry, I could not finish this. Please try again in a minute. If a booking was in progress, ask the team to check it first.';
             // Keep what the traveller already told us, so the next answer only has to add what is still missing.
             if (state.reply !== undefined && status === 'INPUT_REQUIRED') state.context = [state.context, state.reply].filter(Boolean).join(' ');
-            delete state.reply; state.phase = 'blocked'; state.reason = status; await save();
+            delete state.reply; delete state.decision; state.phase = 'blocked'; state.reason = status; await save();
             await this.api(`/v1/tasks/${task.id}/events`, { status, comment });
             outcome = status.toLowerCase(); return;
           }
