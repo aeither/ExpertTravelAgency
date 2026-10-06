@@ -1,0 +1,11 @@
+.env*
+.data
+.git
+.agents
+node_modules
+dist
+docs
+test
+Dockerfile
+railway.json
+dist-worker
