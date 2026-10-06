@@ -18,6 +18,7 @@ import { withSearchExamples } from './openapi-examples.js';
 import { Sokosumi } from './sokosumi.js';
 import { journaledBooking } from './journal.js';
 import { coworkerHtml } from './coworker-ui.js';
+import { destinationKnowledge } from './knowledge.js';
 
 export async function buildApp(config: Config, options: { fetch?: Fetch; poll?: boolean; logger?: boolean } = {}) {
   const app = Fastify({ logger: options.logger ? { redact: ['req.headers.authorization', 'req.headers.token'] } : false, bodyLimit: 128000 }).withTypeProvider<ZodTypeProvider>();
@@ -70,6 +71,8 @@ export async function buildApp(config: Config, options: { fetch?: Fetch; poll?: 
   app.get('/coworker', { schema: { hide: true } }, async (_request, reply) => reply.type('text/html').header('cache-control', 'no-store').send(coworkerHtml));
   // Public wake-up only: no caller-selected task, input, credentials, or result is returned.
   app.post('/v1/sokosumi/tick', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } }, schema: { ...tag('Sokosumi', 'Check assigned Coworker tasks (execution rehearsal)'), body: z.object({}).strict() } }, () => sokosumi.tick());
+  // Called by the Travel Expert orchestrator. Needs the API key like the booking routes.
+  app.post('/v1/knowledge', { schema: { ...tag('Knowledge', 'General destination knowledge for other agents'), body: z.object({ destination: z.string().min(2).max(80), question: z.string().min(3).max(300).optional() }).strict() } }, r => destinationKnowledge(config, r.body));
   app.get('/v1/capabilities', { schema: tag('System', 'Check configured provider access') }, async () => travel.capabilities());
   app.get('/openapi.json', { schema: { hide: true } }, async () => withSearchExamples(app.swagger()));
   app.post('/v1/flights/search', { schema: { ...tag('Flights', 'Search flight offers'), body: s.flightSearch } }, r => travel.flights(r.body));

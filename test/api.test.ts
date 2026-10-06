@@ -350,3 +350,13 @@ test('hotel details report a missing hotel as 404', async t => {
   const res = await app.inject({ url: '/v1/stays/hotels/nope', headers: { authorization: 'Bearer kkkkkkkk' } });
   assert.equal(res.statusCode, 404); assert.equal(res.json().error.code, 'HOTEL_NOT_FOUND');
 });
+
+test('knowledge desk needs the API key and a configured model, and validates its input', async t => {
+  const { app } = await fixture({ TRAVEL_MODE: 'demo', API_KEY: 'k'.repeat(32) }); t.after(() => app.close());
+  const body = { destination: 'Cebu', question: 'Best month to visit?' };
+  assert.equal((await app.inject({ method: 'POST', url: '/v1/knowledge', payload: body })).statusCode, 401);
+  const headers = { authorization: `Bearer ${'k'.repeat(32)}` };
+  assert.equal((await app.inject({ method: 'POST', url: '/v1/knowledge', headers, payload: { destination: 'C' } })).statusCode, 400);
+  const unconfigured = await app.inject({ method: 'POST', url: '/v1/knowledge', headers, payload: body });
+  assert.equal(unconfigured.statusCode, 503); assert.equal(unconfigured.json().error.code, 'KNOWLEDGE_UNAVAILABLE');
+});
