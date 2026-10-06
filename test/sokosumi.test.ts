@@ -194,8 +194,8 @@ test('agent: a plan is shared as a question that keeps the task open; "no" compl
     f.userSays('no thanks'); f.task.status = 'INPUT_REQUIRED';
     const close = agentModel(agentSay('No problem, happy travels!'));
     assert.equal((await new Sokosumi(agentConfig(), store, f.travel, noPaymentNode(f), close).tick()).status, 'completed');
-    assert.match(f.events.at(-1).comment, /happy travels/); assert.ok(!f.events.some(e => e.masumiPayment)); assert.equal(f.checkouts.length, 0);
-    assert.match(JSON.stringify(close.doGenerateCalls[0]!.prompt), /had just shared the saved plan/);
+    assert.match(f.events.at(-1).comment, /happy travels/i); assert.ok(!f.events.some(e => e.masumiPayment)); assert.equal(f.checkouts.length, 0);
+    assert.equal(close.doGenerateCalls.length, 0);                          // a plain "no" is decided by code, not the model
   } finally { store.close(); }
 });
 
@@ -213,8 +213,9 @@ test('agent: replying "book" on the plan task opens the checkout and requests pa
     assert.equal((await new Sokosumi(agentConfig(), store, f.travel, request, plan).tick()).status, 'input_required');
     assert.deepEqual(calls, []);                                          // the plan itself cost nothing
     f.userSays('book'); f.task.status = 'INPUT_REQUIRED';
-    const book = agentModel(agentCall('request_booking', {}), agentSay('unreachable'));
+    const book = agentModel(agentSay('a model that ignores its instructions and re-plans'));
     await new Sokosumi(agentConfig(), store, f.travel, request, book).tick();
+    assert.equal(book.doGenerateCalls.length, 0);                           // "book" is decided by code, so a model cannot re-plan instead
     assert.deepEqual(f.checkouts, ['h1']); assert.equal(f.events.filter(e => e.masumiPayment).length, 1); assert.deepEqual(calls.filter(c => c === '/payment'), ['/payment']);
     assert.ok(!f.events.some(e => /pay\.test/.test(e.comment ?? '')));    // link only after escrow
   } finally { store.close(); }

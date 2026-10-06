@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MockLanguageModelV4 } from 'ai/test';
-import { runAgent, instructions } from '../src/agent.js';
+import { runAgent, instructions, answerToOffer } from '../src/agent.js';
 import { loadPlan } from '../src/planner.js';
 import { Store } from '../src/store.js';
 import { getConfig } from '../src/config.js';
@@ -86,4 +86,10 @@ test('a question written as plain text is still treated as a question', async ()
     const d = await runAgent('Plan a trip to Manila', f.deps, 'u1', { model: script(say('When are you arriving?')), today });
     assert.deepEqual(d, { kind: 'ask', text: 'When are you arriving?' });
   } finally { f.store.close(); }
+});
+
+test('plain yes/no answers to the plan offer are read by code; change requests are left to the model', () => {
+  for (const yes of ['book', 'Book', 'yes', 'Yes please', 'book it', 'go ahead', 'ok', 'Book the hotel', 'please book it!']) assert.equal(answerToOffer(yes), 'yes', yes);
+  for (const no of ['no', 'No thanks', 'nope', 'not now', 'cancel', "that's all"]) assert.equal(answerToOffer(no), 'no', no);
+  for (const other of ['book a cheaper hotel instead', 'yes but a different hotel', 'what about 3 nights?', "don't book yet, add a day", 'Sulit is too far']) assert.equal(answerToOffer(other), undefined, other);
 });

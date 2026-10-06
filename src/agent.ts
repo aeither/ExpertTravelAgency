@@ -81,20 +81,33 @@ export function tools(deps: Deps, owner: string, today: string, fee: string | un
       description: 'The traveller confirmed they want the saved plan booked. Opens the hotel checkout. Ends your turn when it succeeds.',
       inputSchema: z.object({}),
       execute: async () => {
-        const { plan } = await loadPlan(deps, owner);
-        if (!plan) return { ok: false, reason: 'No plan is saved yet. Ask the traveller to request a plan first.' };
-        if (plan.booked) return { ok: false, reason: 'This plan is already booked.' };
-        if (plan.request.start <= today) return { ok: false, reason: 'The dates of the saved plan have passed. Ask for a new plan.' };
-        if (!deps.travel.usesAdvisor) return { ok: false, reason: 'Booking is not available right now.' };
-        // The checkout is opened here, before any charge: no checkout, no charge. The link stays server-side until payment is confirmed.
-        const opened = plan.checkout ? { opened: true, failure_reason: null } : await openCheckout(deps, plan).catch((e: any) => ({ opened: false, failure_reason: String(e?.message ?? 'Checkout failed.') }));
-        if (!opened.opened) return { ok: false, reason: `No checkout could be opened (${opened.failure_reason}). Nothing was charged. Tell the traveller and suggest other dates.` };
-        await savePlan(deps, owner, plan);
-        out.decision = { kind: 'book', text: 'booking', trip_code: plan.id };
-        return { ok: true };
+        const r = await tryBooking(deps, owner, today);
+        if (r.ok) out.decision = { kind: 'book', text: 'booking', trip_code: r.trip_code };
+        return r.ok ? { ok: true } : { ok: false, reason: r.reason };
       },
     }),
   };
+}
+
+// Opens the checkout for the saved plan, before any charge: no checkout, no charge. The link stays server-side until payment is confirmed.
+export async function tryBooking(deps: Deps, owner: string, today: string): Promise<{ ok: true; trip_code: string } | { ok: false; reason: string }> {
+  const { plan } = await loadPlan(deps, owner);
+  if (!plan) return { ok: false, reason: 'No plan is saved yet. Ask the traveller to request a plan first.' };
+  if (plan.booked) return { ok: false, reason: 'This plan is already booked.' };
+  if (plan.request.start <= today) return { ok: false, reason: 'The dates of the saved plan have passed. Ask for a new plan.' };
+  if (!deps.travel.usesAdvisor) return { ok: false, reason: 'Booking is not available right now.' };
+  const opened = plan.checkout ? { opened: true, failure_reason: null } : await openCheckout(deps, plan).catch((e: any) => ({ opened: false, failure_reason: String(e?.message ?? 'Checkout failed.') }));
+  if (!opened.opened) return { ok: false, reason: `No checkout could be opened (${opened.failure_reason}). Nothing was charged. Tell the traveller and suggest other dates.` };
+  await savePlan(deps, owner, plan);
+  return { ok: true, trip_code: plan.id };
+}
+
+// The traveller's answer to "open the checkout? reply book or no". Plain yes/no is decided by code, not by the model.
+export function answerToOffer(reply: string): 'yes' | 'no' | undefined {
+  const t = reply.trim().toLowerCase().replace(/[.!]+$/, '');
+  if (/^(no|nope|nah|no thanks|no thank you|not now|not yet|cancel|stop|that'?s all|that is all|done|all good|i'?m good)\b/.test(t)) return 'no';
+  if (t.length <= 60 && /^(please |yes,? |yeah,? |ok,? |okay,? |sure,? )*(book|yes|yep|yeah|sure|ok|okay|go ahead|confirm|proceed|reserve|do it|let'?s do it|book it|book the hotel|please book( it)?)\b/.test(t) && !/\b(not|don'?t|instead|but|different|cheaper|another)\b/.test(t)) return 'yes';
+  return undefined;
 }
 
 export function modelFor(config: Config): LanguageModel {

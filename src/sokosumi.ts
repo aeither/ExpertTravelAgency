@@ -5,7 +5,7 @@ import type { LanguageModel } from 'ai';
 import { ApiError } from './errors.js';
 import { TaskInputError } from './coworker-search.js';
 import { answerTask, answerFollowUp, needsPayment, completeCheckout } from './planner.js';
-import { agentEnabled, runAgent, type Decision } from './agent.js';
+import { agentEnabled, runAgent, tryBooking, answerToOffer, type Decision } from './agent.js';
 import { PaidFlow, proofBlock, collectionComment } from './sokosumi-paid.js';
 
 // One bounded invocation per request; persistent journal + Postgres session lock.
@@ -136,7 +136,15 @@ export class Sokosumi {
           if (!useAgent || state.decision) return;
           const earlier = [state.input, state.context].filter(Boolean).join(' ');
           const text = state.reply !== undefined ? `Original request: ${earlier}\n${state.offered ? 'I had just shared the saved plan and asked whether to open the checkout.\n' : ''}Traveller's reply to my question: ${state.reply}` : earlier;
-          try { state.decision = await runAgent(text, deps, owner, { model: this.model }); }
+          try {
+            // A plain "book" or "no" to the plan offer is handled by code; anything else (a change request) goes to the model.
+            const choice = state.offered && state.reply !== undefined ? answerToOffer(state.reply) : undefined;
+            if (choice === 'no') state.decision = { kind: 'answer', text: 'No problem. Your plan stays saved: create a new task that says "Book the hotel" whenever you want the checkout. Happy travels!' };
+            else if (choice === 'yes') {
+              const r = await tryBooking(deps, owner, new Date().toISOString().slice(0, 10));
+              state.decision = r.ok ? { kind: 'book', text: 'booking', trip_code: r.trip_code } : { kind: 'answer', text: `I could not open the checkout. ${r.reason.replace(/ Tell the traveller.*$/, '')} You can ask me for a new plan with other dates.` };
+            } else state.decision = await runAgent(text, deps, owner, { model: this.model });
+          }
           catch (error) { console.error('agent failed, using the planner:', String((error as Error)?.message ?? error).slice(0, 200)); state.decision = { kind: 'fallback' }; }
           delete state.offered; await save();
         };
