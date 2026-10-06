@@ -145,13 +145,16 @@ export function parseMessage(text: string, today = new Date()): Intent {
 // Hotels worth recommending: well reviewed, and cheap for what you get.
 const value = (h: any, nights: number) => {
   const price = Number(h.cheapest_total?.amount) / nights;
+  // Some sources give no review score: then the cheapest free-cancellation stay wins.
+  if (!Number(h.rating)) return -price + (h.rooms?.[0]?.refundable ? 1000 : 0);
   return (Number(h.rating) || 0) / Math.log(price + 10) + (h.rooms?.[0]?.refundable ? 0.1 : 0);
 };
 
 export interface Plan {
   id: string; request: TripRequest; end: string; currency: string; attempt: number;
-  hotel: { id: string; name: string; rating: number | null; stars: number | null; total: { amount: string; currency: string }; refundable: boolean; board: string | null; nights: number; offer_id: string };
+  hotel: { id: string; name: string; rating: number | null; stars: number | null; total: { amount: string; currency: string }; refundable: boolean; board: string | null; nights: number; offer_id: string; url?: string | null };
   alternatives: { name: string; rating: number | null; total: { amount: string; currency: string } }[];
+  checkout?: { trip_id: string | null; url: string | null };
   booked?: { booking_id: string; confirmation_code: string | null; guest: string; total: { amount: string; currency: string }; operation_id: string };
 }
 
@@ -167,7 +170,7 @@ export async function buildPlan(request: TripRequest, travel: Travel): Promise<{
   const top = ranked[0], room = top.rooms[0];
   const plan: Plan = {
     id: 'TRIP-' + Math.random().toString(16).slice(2, 8).toUpperCase(), request, end, currency, attempt: 1,
-    hotel: { id: top.id, name: top.name, rating: top.rating ?? null, stars: top.stars ?? null, total: top.cheapest_total, refundable: !!room.refundable, board: room.board ?? null, nights, offer_id: room.offer_id },
+    hotel: { id: top.id, name: top.name, rating: top.rating ?? null, stars: top.stars ?? null, total: top.cheapest_total, refundable: !!room.refundable, board: room.board ?? null, nights, offer_id: room.offer_id, url: top.url ?? null },
     alternatives: ranked.slice(1, 3).map(h => ({ name: h.name, rating: h.rating ?? null, total: h.cheapest_total })),
   };
   return { plan, answer: planAnswer(plan) };
@@ -251,6 +254,7 @@ export async function bookHotel(deps: Deps, owner: string, intent: Extract<Inten
   const given = intent.guest?.given_name ?? deps.config.GUEST_GIVEN_NAME, family = intent.guest?.family_name ?? deps.config.GUEST_FAMILY_NAME;
   const guest = { given_name: given, family_name: family, email: intent.guest?.email ?? deps.config.GUEST_EMAIL };
   const { request, hotel } = plan;
+  if (deps.travel.usesAdvisor) return await checkoutViaAdvisor(deps, owner, plan, notes);
   try {
     // Offers expire, so look up today's price for the same hotel, then book with a ceiling of the price we promised plus 10%.
     const fresh: any = await deps.travel.stays({ check_in_date: request.start, check_out_date: plan.end, rooms: [{ adults: request.travellers }], location: { city: request.destination.city, country_code: request.destination.country_code }, currency: plan.currency, guest_nationality: 'US', limit: 20 });
@@ -272,6 +276,22 @@ export async function bookHotel(deps: Deps, owner: string, intent: Extract<Inten
     const why = error.code === 'PRICE_OVER_BUDGET' ? 'The price went up by more than 10% since I made your plan, so I did not book it.' : error.code === 'RATE_CHANGED' ? 'The hotel changed its cancellation rules, so I did not book it.' : error.code === 'NO_ROOM' ? 'The hotel has no rooms left for those dates.' : 'The hotel did not accept the booking.';
     return `# Your hotel is not booked\n\n${why} Nothing was charged.\n\nSay "plan a trip to ${request.destination.name} for ${request.days} days from ${prettyDate(request.start).replace(/^\w+, /, '')}" and I will find you a fresh plan.\n`;
   }
+}
+
+// The hotel agent opens a pay-at-property checkout. It does not confirm a reservation, so we never say "booked".
+async function checkoutViaAdvisor(deps: Deps, owner: string, plan: Plan, notes: string[]) {
+  const { request, hotel } = plan;
+  if (!plan.checkout) {
+    const result = await deps.travel.advisor.checkout({ destination: request.destination.city, check_in: request.start, check_out: plan.end, adults: request.travellers, property_id: hotel.id });
+    if (!result.opened) {
+      return [`# I could not open the checkout for ${hotel.name}`, '', `The hotel agent said: ${result.failure_reason ?? 'no checkout was available.'} Nothing was booked and nothing was charged.`, '',
+        hotel.url ? `You can still reserve it yourself on Hotels.com (free cancellation, pay at the property): ${hotel.url}` : 'You can search the same dates on Hotels.com.', ...(notes.length ? ['', ...notes] : []), ''].join('\n');
+    }
+    plan.checkout = { trip_id: result.trip_id, url: result.checkout_url }; await savePlan(deps, owner, plan);
+  }
+  return [`# Your checkout for ${hotel.name} is ready`, '', `- **Check in:** ${prettyDate(request.start)}`, `- **Check out:** ${prettyDate(plan.end)} (${hotel.nights} night${hotel.nights === 1 ? '' : 's'})`, `- **Price:** about ${money(hotel.total)}`,
+    plan.checkout.trip_id ? `- **Trip ID:** ${plan.checkout.trip_id}` : '', '', plan.checkout.url ? `**Finish your reservation here:** ${plan.checkout.url}` : '', '',
+    'The room is pay at the property with free cancellation. This opens the checkout; the hotel confirms your reservation when you complete it.', ...(notes.length ? ['', ...notes] : []), ''].filter((l, i, a) => l !== '' || a[i - 1] !== '').join('\n');
 }
 
 function bookedAnswer(plan: Plan, again: boolean, notes: string[]) {

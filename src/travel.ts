@@ -2,6 +2,7 @@ import type { Config } from './config.js';
 import { HttpClient } from './http.js';
 import { Duffel } from './providers/duffel.js';
 import { LiteApi } from './providers/liteapi.js';
+import { Advisor } from './providers/advisor.js';
 import { Demo } from './providers/demo.js';
 import { ApiError } from './errors.js';
 import { summarizeTrip } from './summary.js';
@@ -11,13 +12,15 @@ export class Travel {
   private duffel: Duffel;
   private liteapi: LiteApi;
   private demo = new Demo();
-  constructor(public config: Config, http: HttpClient) { this.duffel = new Duffel(config, http); this.liteapi = new LiteApi(config, http); }
+  advisor: Advisor;
+  constructor(public config: Config, http: HttpClient) { this.duffel = new Duffel(config, http); this.liteapi = new LiteApi(config, http); this.advisor = new Advisor(config); }
+  get usesAdvisor() { return this.advisor.enabled && !this.isDemo; }
   private requireFlights() { if (!this.config.FLIGHTS_ENABLED) throw new ApiError(503, 'FLIGHTS_DISABLED', 'Flights are switched off. Set FLIGHTS_ENABLED=true to use them.'); }
   get isDemo() { return this.config.TRAVEL_MODE === 'demo'; }
   envelope(provider: string, data: unknown) { return { provider: this.isDemo ? 'demo' : provider, environment: this.isDemo ? 'demo' : provider === 'duffel' ? (this.duffel.live ? 'production' : 'sandbox') : (this.liteapi.sandbox ? 'sandbox' : 'production'), observed_at: new Date().toISOString(), data }; }
   async flights(input: FlightSearch) { this.requireFlights(); return this.envelope('duffel', await (this.isDemo ? this.demo.flightSearch(input) : this.duffel.searchFlights(input))); }
   async offer(id: string) { this.requireFlights(); return this.envelope('duffel', await (this.isDemo ? this.demo.offer(id) : this.duffel.getOffer(id))); }
-  async stays(input: StaySearch) { return this.envelope('liteapi', await (this.isDemo ? this.demo.staySearch(input) : this.liteapi.searchStays(input))); }
+  async stays(input: StaySearch) { if (this.usesAdvisor) return { ...this.envelope('advisor', await this.advisor.searchStays(input)), environment: 'live' }; return this.envelope('liteapi', await (this.isDemo ? this.demo.staySearch(input) : this.liteapi.searchStays(input))); }
   async bookFlight(input: FlightBooking, id: string, submitted: () => Promise<void>) { this.requireFlights(); return this.envelope('duffel', await (this.isDemo ? this.demo.book('flight', input, id) : this.duffel.bookFlight(input, id, submitted))); }
   async hotel(id: string) { return this.envelope('liteapi', await (this.isDemo ? this.demo.hotelDetails(id) : this.liteapi.hotelDetails(id))); }
   async bookStay(input: StayBooking, id: string, submitted: () => Promise<void>) { return this.envelope('liteapi', await (this.isDemo ? this.demo.bookStay(input, id) : this.liteapi.bookStay(input, id, submitted))); }
@@ -36,7 +39,7 @@ export class Travel {
     return {
       mode: this.config.TRAVEL_MODE, live_bookings_allowed: this.config.LIVE_BOOKINGS_ALLOWED,
       flights: { provider: 'duffel', enabled: this.config.FLIGHTS_ENABLED, credentials_present: !!this.config.DUFFEL_ACCESS_TOKEN, search_implemented: this.config.FLIGHTS_ENABLED, booking_implemented: this.config.FLIGHTS_ENABLED, supplier_crypto_payment: false },
-      stays: { provider: 'liteapi', credentials_present: !!this.config.LITEAPI_API_KEY, search_implemented: true, booking_implemented: true, supplier_crypto_payment: false },
+      stays: { provider: this.usesAdvisor ? 'expert-travel-advisor' : 'liteapi', credentials_present: this.usesAdvisor || !!this.config.LITEAPI_API_KEY, search_implemented: true, booking_implemented: true, supplier_crypto_payment: false },
       masumi: { mode: this.config.MASUMI_MODE === 'simulated' ? 'simulated' : (!!this.config.MASUMI_TOKEN && !!this.config.MASUMI_AGENT_IDENTIFIER ? 'live' : 'unconfigured'), network: 'Preprod', payment_source_type: 'Web3CardanoV2', credentials_present: !!this.config.MASUMI_TOKEN && !!this.config.MASUMI_AGENT_IDENTIFIER, price_atomic: this.config.MASUMI_PRICE_ATOMIC, token_unit: this.config.MASUMI_TOKEN_UNIT, purpose: 'payment for search work', onchain_verified: false },
     };
   }

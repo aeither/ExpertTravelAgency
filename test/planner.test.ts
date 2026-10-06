@@ -162,3 +162,22 @@ test('flights are switched off: no flight search is made and flight JSON is refu
     await assert.rejects(answerTask('{"flights":{"slices":[]}}', deps, 'u1', 'x'), /do not search flights/);
   } finally { store.close(); }
 });
+
+// Hotel source: the Expert Travel Advisor agent (mocked HTTP). Checkout only opens a checkout and never claims a booking.
+import { Advisor } from '../src/providers/advisor.js';
+import { getConfig as advisorConfig } from '../src/config.js';
+test('advisor hotels are priced per night, ranked by price, and checkout failure is reported honestly', async () => {
+  const config = advisorConfig({ ADVISOR_URL: 'https://advisor.test', FLIGHTS_ENABLED: 'false' });
+  const calls: string[] = [];
+  const request = (async (url: string, options: RequestInit) => {
+    calls.push(url);
+    if (url.endsWith('/hotels/search')) return Response.json({ status: 'completed', heading: '3 Properties', stays: [{ property_id: '1', name: 'Cheap Hut', price: '$40', free_cancellation: true, url: 'https://hotels.test/1' }, { property_id: '2', name: 'Pricey', price: '$90', free_cancellation: true, url: null }] });
+    return Response.json({ detail: 'The selected stay has no offer to open' }, { status: 502 });
+  }) as typeof fetch;
+  const advisor = new Advisor(config, request);
+  const found = await advisor.searchStays({ check_in_date: '2026-10-20', check_out_date: '2026-10-22', rooms: [{ adults: 1 }], location: { city: 'Cebu', country_code: 'PH' } } as any);
+  assert.equal(found.hotels[0]!.cheapest_total.amount, '80.00'); // $40 x 2 nights
+  assert.equal(found.hotels[0]!.rooms[0]!.refundable, true);
+  const result = await advisor.checkout({ destination: 'Cebu', check_in: '2026-10-20', check_out: '2026-10-22', adults: 1, property_id: '1' });
+  assert.equal(result.opened, false); assert.match(result.failure_reason!, /no offer/);
+});

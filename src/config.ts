@@ -22,6 +22,8 @@ const schema = z.object({
   // Flights (Duffel) are switched off for now: the agent plans activities and recommends hotels only.
   FLIGHTS_ENABLED: flag,
   DUFFEL_ACCESS_TOKEN: z.string().default(''),
+  // Hotel source and checkout: the Expert Travel Advisor agent. Empty keeps LiteAPI.
+  ADVISOR_URL: z.string().default(''),
   LITEAPI_API_KEY: z.string().default(''),
   LIVE_BOOKINGS_ALLOWED: flag,
   // Guest on hotel bookings made from a chat message, unless the message names one.
