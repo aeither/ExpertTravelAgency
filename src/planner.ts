@@ -158,7 +158,7 @@ export interface Plan {
   booked?: { booking_id: string; confirmation_code: string | null; guest: string; total: { amount: string; currency: string }; operation_id: string };
 }
 
-export async function buildPlan(request: TripRequest, travel: Travel): Promise<{ plan: Plan; answer: string }> {
+export async function buildPlan(request: TripRequest, travel: Travel, fee?: string): Promise<{ plan: Plan; answer: string }> {
   const { destination, start, days, travellers } = request;
   const end = addDays(start, days - 1), nights = days - 1;
   const currency = 'USD';
@@ -173,7 +173,7 @@ export async function buildPlan(request: TripRequest, travel: Travel): Promise<{
     hotel: { id: top.id, name: top.name, rating: top.rating ?? null, stars: top.stars ?? null, total: top.cheapest_total, refundable: !!room.refundable, board: room.board ?? null, nights, offer_id: room.offer_id, url: top.url ?? null },
     alternatives: ranked.slice(1, 3).map(h => ({ name: h.name, rating: h.rating ?? null, total: h.cheapest_total })),
   };
-  return { plan, answer: planAnswer(plan) };
+  return { plan, answer: planAnswer(plan, fee) };
 }
 
 function itinerary(plan: Plan) {
@@ -205,7 +205,7 @@ function itinerary(plan: Plan) {
   return { lines, cost };
 }
 
-function planAnswer(plan: Plan) {
+function planAnswer(plan: Plan, fee?: string) {
   const { destination, start, days, travellers } = plan.request;
   const nights = days - 1;
   const h = plan.hotel;
@@ -222,8 +222,8 @@ function planAnswer(plan: Plan) {
   const trip = itinerary(plan);
   out.push(...trip.lines, '## What it costs', '',
     `- Hotel: **${money(h.total)}**`, trip.cost ? `- Things to do: about **$${trip.cost}** per person (typical prices, paid on the day)` : '- Things to do: all free', '- Flights: not included. I do not search flights for now.', '',
-    '**Like it? Just say "book the hotel" and I will reserve my top pick for you.**', '',
-    `_Trip code: ${plan.id}. These are test prices, so nothing has been booked or paid yet._`);
+    '**Like it? Create a new task that says "book the hotel" and I will open the checkout for my top pick.**', '',
+    fee ? `_This plan is free. You only pay ${fee} when you confirm the booking, and nothing is charged before that. Trip code: ${plan.id}._` : `_Trip code: ${plan.id}. These are test prices, so nothing has been booked or paid yet._`);
   return out.join('\n') + '\n';
 }
 
@@ -285,7 +285,7 @@ async function checkoutViaAdvisor(deps: Deps, owner: string, plan: Plan, notes: 
   if (!plan.checkout) {
     const result = await deps.travel.advisor.checkout({ destination: request.destination.city, check_in: request.start, check_out: plan.end, adults: request.travellers, property_id: hotel.id });
     if (!result.opened) {
-      return [`# I could not open the checkout for ${hotel.name}`, '', `The hotel agent said: ${(result.failure_reason ?? 'no checkout was available').replace(/\.?$/, '.')} Nothing was booked and nothing was charged.`, '',
+      return [`# I could not open the checkout for ${hotel.name}`, '', `The hotel agent said: ${(result.failure_reason ?? 'no checkout was available').replace(/\.?$/, '.')} Nothing was booked.${deps.config.SOKOSUMI_PAID ? ' Your test payment for this step was already taken, so please ask the team to refund it.' : ' Nothing was charged.'}`, '',
         hotel.url ? `You can still reserve it yourself on Hotels.com (free cancellation, pay at the property): ${hotel.url}` : 'You can search the same dates on Hotels.com.', ...(notes.length ? ['', ...notes] : []), ''].join('\n');
     }
     plan.checkout = { trip_id: result.trip_id, url: result.checkout_url }; await savePlan(deps, owner, plan);
@@ -310,6 +310,18 @@ function bookedAnswer(plan: Plan, again: boolean, notes: string[]) {
   ].filter((l, i, a) => l !== '' || a[i - 1] !== '').join('\n') + '\n';
 }
 
+// Planning is free. The charge happens only when a hotel booking will really be attempted, so a question, a plan
+// or a booking that cannot go ahead (no plan yet, dates gone, already booked, flights only) never costs anything.
+export async function needsPayment(deps: Deps, owner: string, text: string, reply?: string, today = new Date()): Promise<boolean> {
+  const bookingOf = (t: string) => { if (looksLikeJson(t)) return undefined; try { const i = parseMessage(t, today); return i.kind === 'book' ? i : undefined; } catch { return undefined; } };
+  const intent = (reply !== undefined && bookingOf(reply)) || (reply !== undefined ? bookingOf(`${text.trim()} ${reply.trim()}`) : bookingOf(text));
+  if (!intent || !intent.hotel) return false;
+  const plan = (await loadPlan(deps, owner)).plan;
+  if (!plan || plan.booked || plan.request.start <= today.toISOString().slice(0, 10)) return false;
+  if (!deps.travel.usesAdvisor && !intent.guest && deps.config.GUEST_GIVEN_NAME === 'Alex' && deps.config.GUEST_FAMILY_NAME === 'Traveller') return false;
+  return true;
+}
+
 const looksLikeJson = (text: string) => /^\s*(\{|```)/.test(text);
 
 // One entry point for a Sokosumi task: JSON trip searches keep working; plain sentences get a plan or a booking.
@@ -322,7 +334,7 @@ export async function answerTask(description: string, deps: Deps, owner: string,
   const intent = parseMessage(description);
   if (intent.kind === 'redirect') return { answer: intent.message, summary: { action: 'redirect' } };
   if (intent.kind === 'book') return { answer: await bookHotel(deps, owner, intent), summary: { action: 'book' } };
-  const { plan, answer } = await buildPlan(intent.request, deps.travel);
+  const { plan, answer } = await buildPlan(intent.request, deps.travel, deps.config.SOKOSUMI_PAID ? `${Number(deps.config.MASUMI_PRICE_ATOMIC) / 1e6} test USDM` : undefined);
   await savePlan(deps, owner, plan);
   return { answer, summary: { action: 'plan', trip_code: plan.id } };
 }

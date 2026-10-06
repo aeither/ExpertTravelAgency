@@ -4,6 +4,7 @@ import { Sokosumi } from '../src/sokosumi.js';
 import { Store } from '../src/store.js';
 import { getConfig } from '../src/config.js';
 import type { Travel } from '../src/travel.js';
+import { buildPlan, savePlan } from '../src/planner.js';
 
 const coworker = '01a11100-48ed-74a7-b050-f616bc9751d6';
 const id = '01a11103-ed45-7068-b0c6-2ffc923a8fd7';
@@ -116,7 +117,11 @@ test('a task that was already waiting for input before we saw it is left alone',
 // Paid flow with a mocked payment node: no work before confirmed escrow, hash submitted once, collection tracked after completion.
 test('paid task waits for confirmed escrow, submits the result hash once, then tracks collection', async () => {
   const paidConfig = getConfig({ FLIGHTS_ENABLED: 'true', SOKOSUMI_PAID: 'true', SOKOSUMI_COWORKER_ID: coworker, SOKOSUMI_COWORKER_API_KEY: 'coworker_test_runtime_secret', MASUMI_AGENT_IDENTIFIER: 'a'.repeat(64), MASUMI_TOKEN: 'mps_token' });
-  const store = new Store(':memory:'); const f = fixture();
+  const store = new Store(':memory:'); const f = conversation('Book the hotel under Anna Reyes');
+  let bookings = 0; (f.travel as any).bookStay = async () => { bookings++; return { data: { id: 'BK1', confirmation_code: 'C1', total: { amount: '80.00', currency: 'EUR' } } }; };
+  f.travel.stays = (async () => ({ data: { hotels: [{ id: 'h1', name: 'Test Hotel', stars: 3, rating: 9, cheapest_total: { amount: '80.00', currency: 'EUR' }, rooms: [{ offer_id: 'offer', board: 'Room only', refundable: true }] }] } })) as any;
+  const stored = await buildPlan({ destination: (await import('../src/destinations.js')).findDestination('Cebu')[0]!.d, start: '2027-01-09', days: 3, travellers: 1 }, f.travel);
+  await savePlan({ travel: f.travel, store, config: paidConfig }, 'owner', stored.plan);
   const calls: string[] = []; let submitted = ''; let onChain: any = { onChainState: null, CurrentTransaction: null, TransactionHistory: [] };
   const base = f.request;
   const confirmed = (state: string, extra: any = {}) => ({ ...extra, onChainState: state, CurrentTransaction: { status: 'Confirmed', newOnChainState: state, txHash: `tx-${state}` }, TransactionHistory: [{ status: 'Confirmed', newOnChainState: state, txHash: `tx-${state}` }] });
@@ -131,12 +136,12 @@ test('paid task waits for confirmed escrow, submits the result hash once, then t
   const tick = () => new Sokosumi(paidConfig, store, f.travel, request).tick();
   try {
     assert.equal((await tick()).status, 'idle');            // quoted, purchase event posted, escrow not funded: no search yet
-    assert.equal(f.searches(), 0);
+    assert.equal(bookings, 0);
     assert.ok(f.events.some(e => e.masumiPayment?.blockchainIdentifier === 'bid'));
-    assert.equal((await tick()).status, 'idle'); assert.equal(f.searches(), 0);
+    assert.equal((await tick()).status, 'idle'); assert.equal(bookings, 0);
     onChain = confirmed('FundsLocked');                      // buyer's escrow confirmed
     assert.equal((await tick()).status, 'idle');             // searched and submitted the hash, waiting on-chain for it: no completion
-    assert.equal(f.searches(), 1); assert.equal(calls.filter(c => c === '/payment/submit-result').length, 1);
+    assert.equal(bookings, 1); assert.equal(calls.filter(c => c === '/payment/submit-result').length, 1);
     onChain = confirmed('ResultSubmitted', { resultHash: submitted });
     assert.equal((await tick()).status, 'completed');        // result confirmed on chain
     const done = f.events.find(e => e.status === 'COMPLETED');
@@ -146,6 +151,20 @@ test('paid task waits for confirmed escrow, submits the result hash once, then t
     assert.equal((await tick()).status, 'settled');
     assert.match(f.events.at(-1).comment, /preprod\.cexplorer\.io\/tx\/tx-Withdrawn/);
     assert.equal((await tick()).status, 'idle'); assert.equal(f.events.filter(e => /Payout collected/.test(e.comment ?? '')).length, 1);
-    assert.equal(f.searches(), 1); assert.equal(calls.filter(c => c === '/payment/submit-result').length, 1);
+    assert.equal(bookings, 1); assert.equal(calls.filter(c => c === '/payment/submit-result').length, 1);
   } finally { store.close(); }
+});
+
+// Planning is free; only the booking confirmation is charged.
+test('a plan request is never charged, and a booking request with no plan to book is not charged either', async () => {
+  const paidConfig = getConfig({ SOKOSUMI_PAID: 'true', SOKOSUMI_COWORKER_ID: coworker, SOKOSUMI_COWORKER_API_KEY: 'coworker_test_runtime_secret', MASUMI_AGENT_IDENTIFIER: 'a'.repeat(64), MASUMI_TOKEN: 'mps_token' });
+  for (const text of ['Plan a trip to Cebu for 3 days from 9 November', 'Book the hotel']) {
+    const store = new Store(':memory:'); const f = conversation(text);
+    const request = (async (url: string, options: RequestInit) => { assert.ok(!url.startsWith('http://127.0.0.1:3012'), 'payment node must not be called'); return f.request(url, options); }) as typeof fetch;
+    try {
+      await new Sokosumi(paidConfig, store, f.travel, request).tick();
+      assert.ok(!f.events.some(e => e.masumiPayment), text);
+      assert.ok(f.events.some(e => e.status === 'COMPLETED' || e.status === 'INPUT_REQUIRED'), text);
+    } finally { store.close(); }
+  }
 });

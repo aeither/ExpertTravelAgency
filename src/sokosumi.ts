@@ -3,7 +3,7 @@ import type { Storage } from './store.js';
 import type { Travel } from './travel.js';
 import { ApiError } from './errors.js';
 import { TaskInputError } from './coworker-search.js';
-import { answerTask, answerFollowUp } from './planner.js';
+import { answerTask, answerFollowUp, needsPayment } from './planner.js';
 import { PaidFlow, proofBlock, collectionComment } from './sokosumi-paid.js';
 
 // One bounded invocation per request; persistent journal + Postgres session lock.
@@ -87,7 +87,8 @@ export class Sokosumi {
           const reply = await this.reply(task, state);
           if (reply !== undefined) { state = { phase: 'new', input: task.description, resumed: true, ...(state.used ? { used: state.used } : {}), ...(reply.fromEdit ? {} : { reply: reply.text, ...(state.context ? { context: state.context } : {}) }) }; await save(); }
         }
-        const paid = this.config.SOKOSUMI_PAID ? new PaidFlow({ config: this.config, mps: (p, b) => this.mps(p, b), event: (id, b) => this.api(`/v1/tasks/${id}/events`, b), save }) : undefined;
+        // Only a task that books a hotel is charged (decided below, before any work). Older saved states without the flag stay paid.
+        let paid = this.config.SOKOSUMI_PAID && state.charged !== false ? new PaidFlow({ config: this.config, mps: (p, b) => this.mps(p, b), event: (id, b) => this.api(`/v1/tasks/${id}/events`, b), save }) : undefined;
         // Completed paid tasks stay under watch until the node reports collection.
         if (state.phase === 'collecting') {
           if (await paid!.collection(state) === 'settled') {
@@ -124,12 +125,18 @@ export class Sokosumi {
           if (current.status !== 'RUNNING' || !events.some((e: any) => e.status === 'RUNNING' && e.actor?.id === task.assigneeId)) throw new ApiError(409, 'SOKOSUMI_START_UNCERTAIN', 'Inspect the pending start before retrying.');
           state.phase = 'searching'; await save();
         }
+        const owner = String(current.ownerId ?? current.organizationId ?? 'anonymous');
+        if (state.phase === 'searching' && paid && state.charged === undefined && !state.paid) {
+          state.charged = await needsPayment({ travel: this.travel, store: this.store, config: this.config }, owner, [state.input, state.context].filter(Boolean).join(' '), state.reply);
+          await save();
+          if (!state.charged) paid = undefined;
+        }
         if (state.phase === 'searching' && paid) {
           if (await paid.beforeWork(task, state) === 'waiting') { outcome = 'waiting'; return; }
         }
         if (state.phase === 'searching') {
           try {
-            const deps = { travel: this.travel, store: this.store, config: this.config }, owner = String(current.ownerId ?? current.organizationId ?? 'anonymous'), url = 'https://origin-travel-agent.vercel.app';
+            const deps = { travel: this.travel, store: this.store, config: this.config }, url = 'https://origin-travel-agent.vercel.app';
             const earlier = [state.input, state.context].filter(Boolean).join(' ');
             const output = state.reply !== undefined ? await answerFollowUp(earlier, state.reply, deps, owner, url) : await answerTask(earlier, deps, owner, url);
             state = { ...state, phase: 'result-saved', answer: output.answer, summary: output.summary }; await save();
