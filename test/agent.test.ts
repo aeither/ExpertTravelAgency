@@ -27,7 +27,7 @@ test('the agent searches, saves a plan and answers; planning opens no checkout',
   try {
     const model = script(call('search_hotels', trip), call('save_plan', { ...trip, hotel_id: 'h1' }), say('# Your trip to Manila\nStay at First Hotel.'));
     const d = await runAgent('Plan a trip to Manila from 18 October, 2 people', f.deps, 'u1', { model, today });
-    assert.equal(d.kind, 'answer'); assert.match(d.text, /First Hotel/);
+    assert.equal(d.kind, 'offer'); assert.match(d.text, /First Hotel/);
     const saved = (await loadPlan(f.deps, 'u1')).plan!;
     assert.equal(saved.hotel.id, 'h1'); assert.equal(saved.request.travellers, 2); assert.equal(saved.end, '2026-10-20'); assert.equal(f.opened.length, 0);
     assert.match(model.doGenerateCalls[0]!.prompt.map((m: any) => JSON.stringify(m)).join(''), /Plan a trip to Manila/);

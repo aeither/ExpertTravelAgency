@@ -6,9 +6,9 @@ Updated 2026-10-07. No secrets in this file; keys live in `.env.local` (git-igno
 
 `src/sokosumi.ts` polls Sokosumi (Railway `origin-api`, `SOKOSUMI_POLL=true`). For each task it runs the AI agent in `src/agent.ts` (Vercel AI SDK + OpenRouter, model `openrouter/free`).
 
-- **Plan or question:** the agent searches hotels (`search_hotels`), saves the plan (`save_plan`) and writes the answer. Free, no payment.
+- **Plan:** the agent searches hotels (`search_hotels`), saves the plan (`save_plan`) and shares it as an `INPUT_REQUIRED` question: reply "book" to continue in the same task, or "no" to finish. Free, no payment until "book".
 - **Missing detail:** the agent calls `ask_user`; the task goes to `INPUT_REQUIRED` and the traveller's reply continues it.
-- **"Book the hotel" (new task):** the agent calls `request_booking`. Code opens the hotel checkout first (top pick, then fallbacks), and only if one opens does the Masumi paid flow start (escrow, result hash, collection). The checkout link is handed over by code after escrow is confirmed. The model has no tool that charges and never sees the link.
+- **"book" (reply on the plan task, or a new "Book the hotel" task):** the agent calls `request_booking`. Code opens the hotel checkout first (top pick, then fallbacks), and only if one opens does the Masumi paid flow start (escrow, result hash, collection). The checkout link is handed over by code after escrow is confirmed. The model has no tool that charges and never sees the link.
 - **Model failure:** the deterministic planner (`src/planner.ts`) answers instead.
 
 ## Where things run

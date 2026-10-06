@@ -87,7 +87,7 @@ export class Sokosumi {
         // The traveller answered our question (a reply on the task, or an edited description set back to Ready): continue the same task.
         if (state.phase === 'blocked' && state.reason === 'INPUT_REQUIRED' && ['READY', 'INPUT_REQUIRED'].includes(task.status)) {
           const reply = await this.reply(task, state);
-          if (reply !== undefined) { state = { phase: 'new', input: task.description, resumed: true, ...(state.used ? { used: state.used } : {}), ...(reply.fromEdit ? {} : { reply: reply.text, ...(state.context ? { context: state.context } : {}) }) }; await save(); }
+          if (reply !== undefined) { state = { phase: 'new', input: task.description, resumed: true, ...(state.offered ? { offered: true } : {}), ...(state.used ? { used: state.used } : {}), ...(reply.fromEdit ? {} : { reply: reply.text, ...(state.context ? { context: state.context } : {}) }) }; await save(); }
         }
         // Only a task that books a hotel is charged (decided below, before any work). Older saved states without the flag stay paid.
         let paid = this.config.SOKOSUMI_PAID && state.charged !== false ? new PaidFlow({ config: this.config, mps: (p, b) => this.mps(p, b), event: (id, b) => this.api(`/v1/tasks/${id}/events`, b), save }) : undefined;
@@ -135,10 +135,10 @@ export class Sokosumi {
         const decide = async () => {
           if (!useAgent || state.decision) return;
           const earlier = [state.input, state.context].filter(Boolean).join(' ');
-          const text = state.reply !== undefined ? `Original request: ${earlier}\nTraveller's reply to my question: ${state.reply}` : earlier;
+          const text = state.reply !== undefined ? `Original request: ${earlier}\n${state.offered ? 'I had just shared the saved plan and asked whether to open the checkout.\n' : ''}Traveller's reply to my question: ${state.reply}` : earlier;
           try { state.decision = await runAgent(text, deps, owner, { model: this.model }); }
           catch (error) { console.error('agent failed, using the planner:', String((error as Error)?.message ?? error).slice(0, 200)); state.decision = { kind: 'fallback' }; }
-          await save();
+          delete state.offered; await save();
         };
         if (state.phase === 'searching' && paid && state.charged === undefined && !state.paid) {
           await decide();
@@ -157,6 +157,7 @@ export class Sokosumi {
             await decide();
             const d: Decision | { kind: 'fallback' } | undefined = state.decision;
             if (d?.kind === 'ask') throw new TaskInputError(d.text);
+            if (d?.kind === 'offer') { state.offered = true; throw new TaskInputError(d.text); }
             const output = d?.kind === 'answer' ? { answer: d.text, summary: { action: 'plan', ...(d.trip_code ? { trip_code: d.trip_code } : {}), by: 'agent' } }
               : d?.kind === 'book' ? { answer: await completeCheckout(deps, owner), summary: { action: 'book', by: 'agent' } }
               : state.reply !== undefined ? await answerFollowUp(earlier, state.reply, deps, owner, url) : await answerTask(earlier, deps, owner, url);

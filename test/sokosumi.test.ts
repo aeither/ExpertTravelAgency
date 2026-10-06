@@ -185,12 +185,38 @@ function agentFixture(text: string) {
 const noPaymentNode = (f: { request: typeof fetch }) => (async (url: string, options: RequestInit) => { assert.ok(!url.startsWith('http://127.0.0.1:3012'), 'payment node must not be called'); return f.request(url, options); }) as typeof fetch;
 const stay = { city: 'Manila', country_code: 'PH', check_in: '2027-01-09', nights: 2, adults: 2 };
 
-test('agent: a plan request is answered by the agent and never charged', async () => {
+test('agent: a plan is shared as a question that keeps the task open; "no" completes it, free', async () => {
   const store = new Store(':memory:'); const f = agentFixture('Plan a trip to Manila from 9 January 2027, 2 people');
   try {
-    const model = agentModel(agentCall('search_hotels', stay), agentCall('save_plan', { ...stay, hotel_id: 'h1' }), agentSay('# Manila plan\nStay at Test Hotel.'));
-    assert.equal((await new Sokosumi(agentConfig(), store, f.travel, noPaymentNode(f), model).tick()).status, 'completed');
-    assert.ok(!f.events.some(e => e.masumiPayment)); assert.match(f.events.at(-1).comment, /Manila plan/); assert.equal(f.checkouts.length, 0);
+    const plan = agentModel(agentCall('search_hotels', stay), agentCall('save_plan', { ...stay, hotel_id: 'h1' }), agentSay('# Manila plan\nStay at Test Hotel.\nReply "book" or "no".'));
+    assert.equal((await new Sokosumi(agentConfig(), store, f.travel, noPaymentNode(f), plan).tick()).status, 'input_required');
+    assert.equal(f.events.at(-1).status, 'INPUT_REQUIRED'); assert.match(f.events.at(-1).comment, /Manila plan/); assert.ok(!f.events.some(e => e.masumiPayment));
+    f.userSays('no thanks'); f.task.status = 'INPUT_REQUIRED';
+    const close = agentModel(agentSay('No problem, happy travels!'));
+    assert.equal((await new Sokosumi(agentConfig(), store, f.travel, noPaymentNode(f), close).tick()).status, 'completed');
+    assert.match(f.events.at(-1).comment, /happy travels/); assert.ok(!f.events.some(e => e.masumiPayment)); assert.equal(f.checkouts.length, 0);
+    assert.match(JSON.stringify(close.doGenerateCalls[0]!.prompt), /had just shared the saved plan/);
+  } finally { store.close(); }
+});
+
+test('agent: replying "book" on the plan task opens the checkout and requests payment in the same task', async () => {
+  const store = new Store(':memory:'); const f = agentFixture('Plan a trip to Manila from 9 January 2027, 2 people');
+  const calls: string[] = []; const base = f.request;
+  const request = (async (url: string, options: RequestInit) => {
+    if (!url.startsWith('http://127.0.0.1:3012')) return base(url, options);
+    const path = url.replace('http://127.0.0.1:3012/api/v1', ''), body = JSON.parse(String(options.body)); calls.push(path);
+    if (path === '/payment') return Response.json({ status: 'success', data: { blockchainIdentifier: 'bid', agentIdentifier: 'a'.repeat(64), inputHash: body.inputHash, RequestedFunds: body.RequestedFunds, payByTime: String(Date.parse(body.payByTime)), submitResultTime: String(Date.parse(body.submitResultTime)), unlockTime: String(Date.parse(body.unlockTime)), externalDisputeUnlockTime: String(Date.parse(body.externalDisputeUnlockTime)), sellerReturnAddress: null, forceLayer: null, SmartContractWallet: { walletVkey: 'seller' }, PaymentSource: { network: 'Preprod', paymentSourceType: 'Web3CardanoV2', smartContractAddress: 'addr_sc', policyId: 'policy' } } });
+    return Response.json({ status: 'success', data: { onChainState: null, CurrentTransaction: null, TransactionHistory: [] } });
+  }) as typeof fetch;
+  try {
+    const plan = agentModel(agentCall('search_hotels', stay), agentCall('save_plan', { ...stay, hotel_id: 'h1' }), agentSay('# Manila plan\nReply "book" or "no".'));
+    assert.equal((await new Sokosumi(agentConfig(), store, f.travel, request, plan).tick()).status, 'input_required');
+    assert.deepEqual(calls, []);                                          // the plan itself cost nothing
+    f.userSays('book'); f.task.status = 'INPUT_REQUIRED';
+    const book = agentModel(agentCall('request_booking', {}), agentSay('unreachable'));
+    await new Sokosumi(agentConfig(), store, f.travel, request, book).tick();
+    assert.deepEqual(f.checkouts, ['h1']); assert.equal(f.events.filter(e => e.masumiPayment).length, 1); assert.deepEqual(calls.filter(c => c === '/payment'), ['/payment']);
+    assert.ok(!f.events.some(e => /pay\.test/.test(e.comment ?? '')));    // link only after escrow
   } finally { store.close(); }
 });
 
