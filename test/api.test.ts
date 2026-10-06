@@ -18,7 +18,7 @@ const flightBooking = () => ({ offer_id: 'off_1', passengers: [passenger], max_t
 const offer = (overrides: object = {}) => ({ id: 'off_1', total_amount: '180.00', total_currency: 'USD', live_mode: false, passengers: [{ id: 'pas_1' }], expires_at: new Date(Date.now() + 600000).toISOString(), ...overrides });
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const noNetwork: Fetch = async () => { throw new Error('Unexpected network access'); };
-async function fixture(env: Record<string, string> = {}, fetcher: Fetch = noNetwork) { return buildApp(getConfig({ DATA_PATH: ':memory:', ...env }), { fetch: fetcher, poll: false }); }
+async function fixture(env: Record<string, string> = {}, fetcher: Fetch = noNetwork) { return buildApp(getConfig({ DATA_PATH: ':memory:', FLIGHTS_ENABLED: 'true', ...env }), { fetch: fetcher, poll: false }); }
 
 test('demo supports flight and hotel search, flight booking, and idempotent replay', async t => {
   const { app } = await fixture({ TRAVEL_MODE: 'demo' }); t.after(() => app.close());
@@ -82,7 +82,7 @@ test('supplier requests use the documented Duffel and LiteAPI wrappers and heade
 test('flight booking refreshes price and blocks price increases, expired offers, wrong passengers, and live tokens', async t => {
   for (const [override, expectedCode] of [[{ total_amount: '201.00' }, 'PRICE_OVER_BUDGET'], [{ total_currency: 'SGD' }, 'CURRENCY_CHANGED'], [{ expires_at: '2020-01-01T00:00:00Z' }, 'QUOTE_EXPIRED'], [{ passengers: [{ id: 'pas_other' }] }, 'PASSENGER_MISMATCH']] as const) {
     let posts = 0;
-    const { app } = await fixture({ DUFFEL_ACCESS_TOKEN: 'duffel_test_fixture' }, async (url, init) => { if (init?.method === 'POST') posts++; return response({ data: offer(override) }); });
+    const { app } = await fixture({ DUFFEL_ACCESS_TOKEN: 'duffel_test_fixture', FLIGHTS_ENABLED: 'true' }, async (url, init) => { if (init?.method === 'POST') posts++; return response({ data: offer(override) }); });
     const res = await app.inject({ method: 'POST', url: '/v1/flights/bookings', headers: { 'idempotency-key': 'budget-check-1' }, payload: flightBooking() });
     assert.equal(res.json().error.code, expectedCode); assert.equal(posts, 0); await app.close();
   }
@@ -98,7 +98,7 @@ test('uncertain booking survives a restart and blocks automatic resubmission', a
     if (init?.method === 'POST') { posts++; throw new Error('Connection dropped after order submission'); }
     return response({ data: offer() });
   };
-  const config = getConfig({ DATA_PATH: join(directory, 'journal.sqlite'), DUFFEL_ACCESS_TOKEN: 'duffel_test_fixture' });
+  const config = getConfig({ DATA_PATH: join(directory, 'journal.sqlite'), DUFFEL_ACCESS_TOKEN: 'duffel_test_fixture', FLIGHTS_ENABLED: 'true' });
   let server = await buildApp(config, { fetch: fetcher, poll: false });
   const req = { method: 'POST' as const, url: '/v1/flights/bookings', headers: { 'idempotency-key': 'persistent-booking-1' }, payload: flightBooking() };
   const first = await server.app.inject(req); assert.equal(first.statusCode, 504); assert.equal(first.json().error.details.state, 'uncertain');
@@ -109,7 +109,7 @@ test('uncertain booking survives a restart and blocks automatic resubmission', a
 
 test('concurrent booking requests do not create two supplier orders', async t => {
   let posts = 0;
-  const { app } = await fixture({ DUFFEL_ACCESS_TOKEN: 'duffel_test_fixture' }, async (url, init) => {
+  const { app } = await fixture({ DUFFEL_ACCESS_TOKEN: 'duffel_test_fixture', FLIGHTS_ENABLED: 'true' }, async (url, init) => {
     if (init?.method === 'POST') { posts++; return response({ data: { id: 'ord_1', booking_reference: 'TEST00', live_mode: false } }); }
     return response({ data: offer() });
   }); t.after(() => app.close());
@@ -134,7 +134,7 @@ test('authenticated routes include docs, while health stays public', async t => 
 });
 
 test('supplier errors never return traveler fields or supplier secrets', async t => {
-  const { app } = await fixture({ DUFFEL_ACCESS_TOKEN: 'duffel_test_fixture' }, async () => response({ errors: [{ code: 'invalid_offer', message: 'Secret and traveler test@example.com' }] }, 422)); t.after(() => app.close());
+  const { app } = await fixture({ DUFFEL_ACCESS_TOKEN: 'duffel_test_fixture', FLIGHTS_ENABLED: 'true' }, async () => response({ errors: [{ code: 'invalid_offer', message: 'Secret and traveler test@example.com' }] }, 422)); t.after(() => app.close());
   const result = await app.inject({ method: 'POST', url: '/v1/flights/search', payload: flightInput() });
   assert.equal(result.statusCode, 502); assert.ok(!result.body.includes('test@example.com')); assert.ok(!result.body.includes('Secret'));
 });

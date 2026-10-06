@@ -15,9 +15,15 @@ const schema = z.object({
   SOKOSUMI_COWORKER_ID: z.string().default(''),
   SOKOSUMI_COWORKER_API_KEY: z.string().default(''),
   PUBLIC_SEARCH: flag,
+  // Flights (Duffel) are switched off for now: the agent plans activities and recommends hotels only.
+  FLIGHTS_ENABLED: flag,
   DUFFEL_ACCESS_TOKEN: z.string().default(''),
   LITEAPI_API_KEY: z.string().default(''),
   LIVE_BOOKINGS_ALLOWED: flag,
+  // Guest on hotel bookings made from a chat message, unless the message names one.
+  GUEST_GIVEN_NAME: z.string().default('Alex'),
+  GUEST_FAMILY_NAME: z.string().default('Traveller'),
+  GUEST_EMAIL: z.email().default('alex.traveller@example.com'),
   UPSTREAM_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(45000),
   // simulated: labelled rehearsal settlement with no chain. live: Masumi Payment Service.
   MASUMI_MODE: z.enum(['live', 'simulated']).default('live'),
