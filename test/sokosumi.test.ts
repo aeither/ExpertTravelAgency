@@ -21,7 +21,7 @@ function fixture(failCompletion = false, invalid = false) {
       if (options.method === 'GET') return Response.json({ data: events });
       const body = JSON.parse(String(options.body));
       const event = { ...body, id: `event-${events.length}`, taskId: id, actor: { id: coworker } };
-      events.push(event); task.status = body.status;
+      events.push(event); if (body.status) task.status = body.status;
       if (body.status === 'COMPLETED' && failCompletion) throw new Error('Connection lost after successful write');
       return Response.json({ data: event });
     }
@@ -110,5 +110,38 @@ test('a task that was already waiting for input before we saw it is left alone',
     f.task.status = 'INPUT_REQUIRED'; f.userSays('hello');
     assert.equal((await new Sokosumi(config, store, f.travel, f.request).tick()).status, 'idle');
     assert.equal(f.events.length, 1);
+  } finally { store.close(); }
+});
+
+// Paid flow with a mocked payment node: no work before confirmed escrow, hash submitted once, collection tracked after completion.
+test('paid task waits for confirmed escrow, submits the result hash once, then tracks collection', async () => {
+  const paidConfig = getConfig({ FLIGHTS_ENABLED: 'true', SOKOSUMI_PAID: 'true', SOKOSUMI_COWORKER_ID: coworker, SOKOSUMI_COWORKER_API_KEY: 'coworker_test_runtime_secret', MASUMI_AGENT_IDENTIFIER: 'a'.repeat(64), MASUMI_TOKEN: 'mps_token' });
+  const store = new Store(':memory:'); const f = fixture();
+  const calls: string[] = []; let submitted = ''; let onChain: any = { onChainState: null, CurrentTransaction: null, TransactionHistory: [] };
+  const base = f.request;
+  const confirmed = (state: string, extra: any = {}) => ({ ...extra, onChainState: state, CurrentTransaction: { status: 'Confirmed', newOnChainState: state, txHash: `tx-${state}` }, TransactionHistory: [{ status: 'Confirmed', newOnChainState: state, txHash: `tx-${state}` }] });
+  const request = (async (url: string, options: RequestInit) => {
+    if (!url.startsWith('http://127.0.0.1:3012')) return base(url, options);
+    const path = url.replace('http://127.0.0.1:3012/api/v1', ''), body = JSON.parse(String(options.body));
+    calls.push(path); assert.equal((options.headers as any).token, 'mps_token');
+    if (path === '/payment') return Response.json({ status: 'success', data: { blockchainIdentifier: 'bid', agentIdentifier: 'a'.repeat(64), inputHash: body.inputHash, RequestedFunds: body.RequestedFunds, payByTime: String(Date.parse(body.payByTime)), submitResultTime: String(Date.parse(body.submitResultTime)), unlockTime: String(Date.parse(body.unlockTime)), externalDisputeUnlockTime: String(Date.parse(body.externalDisputeUnlockTime)), sellerReturnAddress: null, SmartContractWallet: { walletVkey: 'vkey' }, PaymentSource: { network: 'Preprod', paymentSourceType: 'Web3CardanoV2', smartContractAddress: 'addr', policyId: 'policy' } } });
+    if (path === '/payment/submit-result') { submitted = body.submitResultHash; return Response.json({ status: 'success', data: {} }); }
+    return Response.json({ status: 'success', data: onChain });
+  }) as typeof fetch;
+  const tick = () => new Sokosumi(paidConfig, store, f.travel, request).tick();
+  try {
+    assert.equal((await tick()).status, 'idle');            // quoted, purchase event posted, escrow not funded: no search yet
+    assert.equal(f.searches(), 0);
+    assert.ok(f.events.some(e => e.masumiPayment?.blockchainIdentifier === 'bid'));
+    assert.equal((await tick()).status, 'idle'); assert.equal(f.searches(), 0);
+    onChain = confirmed('FundsLocked');                      // buyer's escrow confirmed
+    assert.equal((await tick()).status, 'idle');             // searched and submitted the hash, waiting on-chain for it: no completion
+    assert.equal(f.searches(), 1); assert.equal(calls.filter(c => c === '/payment/submit-result').length, 1);
+    onChain = confirmed('ResultSubmitted', { resultHash: submitted });
+    assert.equal((await tick()).status, 'completed');        // result confirmed on chain
+    assert.equal(calls.filter(c => c === '/payment').length, 1); assert.equal(f.events.filter(e => e.masumiPayment).length, 1);
+    onChain = confirmed('Withdrawn');
+    assert.equal((await tick()).status, 'settled');
+    assert.equal(f.searches(), 1); assert.equal(calls.filter(c => c === '/payment/submit-result').length, 1);
   } finally { store.close(); }
 });

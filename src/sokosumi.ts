@@ -4,6 +4,7 @@ import type { Travel } from './travel.js';
 import { ApiError } from './errors.js';
 import { TaskInputError } from './coworker-search.js';
 import { answerTask, answerFollowUp } from './planner.js';
+import { PaidFlow } from './sokosumi-paid.js';
 
 // One bounded invocation per request; persistent journal + Postgres session lock.
 export class Sokosumi {
@@ -23,6 +24,16 @@ export class Sokosumi {
     }
     return payload;
   }
+  private async mps(path: string, body: unknown) {
+    const managed = new URL(this.config.MASUMI_URL).hostname === 'app.masumi.network';
+    const response = await this.request(this.config.MASUMI_URL + path, {
+      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30000),
+      headers: { 'Content-Type': 'application/json', ...(managed ? { Authorization: `Bearer ${this.config.MASUMI_TOKEN}` } : { token: this.config.MASUMI_TOKEN }) }, body: JSON.stringify(body),
+    });
+    const payload: any = await response.json().catch(() => ({}));
+    if (!response.ok || payload.status !== 'success') throw new ApiError(502, 'MASUMI_REQUEST_FAILED', `Payment node returned HTTP ${response.status} for ${path}. Inspect the saved payment before retrying.`);
+    return payload.data;
+  }
   async tick() {
     if (!this.configured) throw new ApiError(503, 'SOKOSUMI_UNCONFIGURED', 'Coworker runtime is not configured.');
     const me = (await this.api('/v1/coworkers/me')).data;
@@ -37,13 +48,13 @@ export class Sokosumi {
         if (!['READY', 'RUNNING', 'COMPLETED', 'INPUT_REQUIRED'].includes(task.status)) continue;
         if (task.runAt && new Date(task.runAt).getTime() > Date.now()) continue;
         const outcome = await this.advance(task);
-        if (outcome !== 'skipped') return { status: outcome, execution_only: true };
+        if (outcome !== 'skipped' && outcome !== 'waiting') return { status: outcome, execution_only: !this.config.SOKOSUMI_PAID };
       }
       cursor = page.meta?.pagination?.nextCursor;
       if (cursor && cursors.has(cursor)) throw new ApiError(502, 'SOKOSUMI_PAGINATION_ERROR', 'Repeated task cursor.');
       if (cursor) cursors.add(cursor);
     } while (cursor);
-    return { status: 'idle', execution_only: true };
+    return { status: 'idle', execution_only: !this.config.SOKOSUMI_PAID };
   }
   // The traveller's answer to our last question: the newest user comment after it, or a new description set back to Ready.
   private async reply(task: any, state: any): Promise<{ text: string; fromEdit?: boolean } | undefined> {
@@ -76,11 +87,17 @@ export class Sokosumi {
           const reply = await this.reply(task, state);
           if (reply !== undefined) { state = { phase: 'new', input: task.description, resumed: true, ...(state.used ? { used: state.used } : {}), ...(reply.fromEdit ? {} : { reply: reply.text, ...(state.context ? { context: state.context } : {}) }) }; await save(); }
         }
+        const paid = this.config.SOKOSUMI_PAID ? new PaidFlow({ config: this.config, mps: (p, b) => this.mps(p, b), event: (id, b) => this.api(`/v1/tasks/${id}/events`, b), save }) : undefined;
+        // Completed paid tasks stay under watch until the node reports collection.
+        if (state.phase === 'collecting') {
+          if (await paid!.collection(state) === 'settled') { state.phase = 'completed'; await save(); outcome = 'settled'; } else outcome = 'waiting';
+          return;
+        }
         if (state.phase === 'completed' || state.phase === 'blocked') { outcome = 'skipped'; return; }
         if (task.status === 'COMPLETED') {
           if (state.phase !== 'complete-pending') { outcome = 'skipped'; return; }
           const events = (await this.api(`/v1/tasks/${task.id}/events?limit=100`)).data;
-          if (events.some((e: any) => e.status === 'COMPLETED' && e.comment === state.answer && e.actor?.id === task.assigneeId)) { state.phase = 'completed'; await save(); outcome = 'completed'; return; }
+          if (events.some((e: any) => e.status === 'COMPLETED' && e.comment === state.answer && e.actor?.id === task.assigneeId)) { state.phase = paid ? 'collecting' : 'completed'; await save(); outcome = 'completed'; return; }
           throw new ApiError(409, 'SOKOSUMI_UNCERTAIN', 'Completion does not match the saved answer. Operator inspection is required.');
         }
         if (state.phase === 'new' && task.status !== 'READY' && !(state.resumed && task.status === 'INPUT_REQUIRED')) { outcome = 'skipped'; return; }
@@ -103,6 +120,9 @@ export class Sokosumi {
           if (current.status !== 'RUNNING' || !events.some((e: any) => e.status === 'RUNNING' && e.actor?.id === task.assigneeId)) throw new ApiError(409, 'SOKOSUMI_START_UNCERTAIN', 'Inspect the pending start before retrying.');
           state.phase = 'searching'; await save();
         }
+        if (state.phase === 'searching' && paid) {
+          if (await paid.beforeWork(task, state) === 'waiting') { outcome = 'waiting'; return; }
+        }
         if (state.phase === 'searching') {
           try {
             const deps = { travel: this.travel, store: this.store, config: this.config }, owner = String(current.ownerId ?? current.organizationId ?? 'anonymous'), url = 'https://origin-travel-agent.vercel.app';
@@ -120,12 +140,13 @@ export class Sokosumi {
           }
         }
         if (state.phase === 'complete-pending') { outcome = 'inspection_required'; return; }
+        if (paid && await paid.afterWork(task, state) === 'waiting') { outcome = 'waiting'; return; }
         const latest = (await this.api(`/v1/tasks/${task.id}`)).data;
         if (latest.status !== 'RUNNING' || latest.description !== state.input || latest.assigneeId !== task.assigneeId) throw new ApiError(409, 'SOKOSUMI_TASK_CHANGED', 'Task changed before completion.');
         state.phase = 'complete-pending'; await save();
         const event = (await this.api(`/v1/tasks/${task.id}/events`, { status: 'COMPLETED', comment: state.answer })).data;
         if (event.status !== 'COMPLETED' || !event.id || event.taskId !== task.id) throw new ApiError(502, 'SOKOSUMI_COMPLETE_UNCERTAIN', 'Completion event was not confirmed.');
-        state.phase = 'completed'; state.eventId = event.id; await save(); outcome = 'completed';
+        state.phase = paid ? 'collecting' : 'completed'; state.eventId = event.id; await save(); outcome = 'completed';
       });
     } finally { this.active.delete(lockId); }
     return outcome;
