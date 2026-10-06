@@ -186,8 +186,9 @@ test('checkout sends the exact body the hotel agent documents, and a 400 names t
   const config = advisorConfig({ ADVISOR_URL: 'https://advisor.test' });
   let sent: any;
   const ok = new Advisor(config, (async (_u: string, o: RequestInit) => { sent = JSON.parse(String(o.body)); return Response.json({ checkout: { trip_id: 'T1', checkout_url: 'https://pay.test/T1' } }); }) as typeof fetch);
-  await new Advisor(config, (async (_u: string, o: RequestInit) => { sent = JSON.parse(String(o.body)); return Response.json({ stays: [] }); }) as typeof fetch).searchStays({ check_in_date: '2026-10-13', check_out_date: '2026-10-15', rooms: [{ adults: 2 }], location: { city: 'Boracay', country_code: 'PH' } } as any);
-  assert.deepEqual(sent, { destination: 'Boracay', check_in: '2026-10-13', check_out: '2026-10-15', adults: 2, payment_type: 'PAY_LATER', lodging: '' });
+  const searched: any[] = [];
+  await new Advisor(config, (async (_u: string, o: RequestInit) => { searched.push(JSON.parse(String(o.body))); return Response.json({ stays: [] }); }) as typeof fetch).searchStays({ check_in_date: '2026-10-13', check_out_date: '2026-10-15', rooms: [{ adults: 2 }], location: { city: 'Boracay', country_code: 'PH' } } as any);
+  assert.deepEqual(searched.map(b => b.lodging).sort(), ['', 'APART_HOTEL']); assert.equal(searched[0].payment_type, 'PAY_LATER');
   const result = await ok.checkout({ destination: 'Boracay', check_in: '2026-10-13', check_out: '2026-10-15', adults: 2, property_id: '99' });
   assert.deepEqual(sent, { destination: 'Boracay', check_in: '2026-10-13', check_out: '2026-10-15', adults: 2, payment_type: 'PAY_LATER', lodging: '', property_id: '99' });
   assert.equal(result.opened, true);

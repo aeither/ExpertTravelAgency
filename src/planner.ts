@@ -152,11 +152,14 @@ const value = (h: any, nights: number) => {
 
 export interface Plan {
   id: string; request: TripRequest; end: string; currency: string; attempt: number;
-  hotel: { id: string; name: string; rating: number | null; stars: number | null; total: { amount: string; currency: string }; refundable: boolean; board: string | null; nights: number; offer_id: string; url?: string | null };
-  alternatives: { name: string; rating: number | null; total: { amount: string; currency: string } }[];
+  hotel: { id: string; name: string; rating: number | null; stars: number | null; total: { amount: string; currency: string }; refundable: boolean; board: string | null; nights: number; offer_id: string; url?: string | null; lodging?: string };
+  alternatives: Plan['hotel'][];
   checkout?: { trip_id: string | null; url: string | null };
+  swappedFrom?: string;
   booked?: { booking_id: string; confirmation_code: string | null; guest: string; total: { amount: string; currency: string }; operation_id: string };
 }
+
+const hotelOf = (h: any, nights: number): Plan['hotel'] => ({ id: h.id, name: h.name, rating: h.rating ?? null, stars: h.stars ?? null, total: h.cheapest_total, refundable: !!h.rooms[0].refundable, board: h.rooms[0].board ?? null, nights, offer_id: h.rooms[0].offer_id, url: h.url ?? null, ...(h.lodging !== undefined ? { lodging: h.lodging } : {}) });
 
 export async function buildPlan(request: TripRequest, travel: Travel, fee?: string): Promise<{ plan: Plan; answer: string }> {
   const { destination, start, days, travellers } = request;
@@ -170,8 +173,9 @@ export async function buildPlan(request: TripRequest, travel: Travel, fee?: stri
   const top = ranked[0], room = top.rooms[0];
   const plan: Plan = {
     id: 'TRIP-' + Math.random().toString(16).slice(2, 8).toUpperCase(), request, end, currency, attempt: 1,
-    hotel: { id: top.id, name: top.name, rating: top.rating ?? null, stars: top.stars ?? null, total: top.cheapest_total, refundable: !!room.refundable, board: room.board ?? null, nights, offer_id: room.offer_id, url: top.url ?? null },
-    alternatives: ranked.slice(1, 3).map(h => ({ name: h.name, rating: h.rating ?? null, total: h.cheapest_total })),
+    hotel: hotelOf(top, nights),
+    // Shown: the first two. All are kept so a checkout that cannot open falls back to the next one.
+    alternatives: ranked.slice(1, 6).map(h => hotelOf(h, nights)),
   };
   return { plan, answer: planAnswer(plan, fee) };
 }
@@ -217,7 +221,7 @@ function planAnswer(plan: Plan, fee?: string) {
     `**Top pick: ${h.name}**${h.stars ? ` (${h.stars} stars)` : ''} · ${nights} night${nights === 1 ? '' : 's'} · **${money(h.total)}**`,
     h.rating ? `Guests rate it ${h.rating} out of 10. It is the best mix of happy guests and a good price.` : 'A good price for the area.',
     h.refundable ? 'You can cancel for free for a while.' : 'This price cannot be refunded once booked.'];
-  if (plan.alternatives.length) out.push('', '**Also worth a look**', ...plan.alternatives.map(a => `- ${a.name}${a.rating ? ` (${a.rating}/10)` : ''}, ${money(a.total)}`));
+  if (plan.alternatives.length) out.push('', '**Also worth a look**', ...plan.alternatives.slice(0, 2).map(a => `- ${a.name}${a.rating ? ` (${a.rating}/10)` : ''}, ${money(a.total)}`));
   out.push('', '## Day by day', '');
   const trip = itinerary(plan);
   out.push(...trip.lines, '## What it costs', '',
@@ -227,11 +231,23 @@ function planAnswer(plan: Plan, fee?: string) {
   return out.join('\n') + '\n';
 }
 
-// Search again with the plan's own dates and group: the hotel agent only opens a checkout for a stay it lists right now.
-async function stillListed(deps: Deps, plan: Plan) {
-  const { request, hotel } = plan;
+// Search again with the plan's own dates and group, then open a checkout: the top pick first, then the next
+// candidates, because the hotel agent cannot open an offer for every stay it lists. The first one that opens wins.
+async function openCheckout(deps: Deps, plan: Plan): Promise<{ opened: boolean; failure_reason: string | null }> {
+  const { request } = plan;
   const fresh: any = await deps.travel.stays({ check_in_date: request.start, check_out_date: plan.end, rooms: [{ adults: request.travellers }], location: { city: request.destination.city, country_code: request.destination.country_code }, currency: plan.currency, guest_nationality: 'US', limit: 20 });
-  return (fresh.data.hotels ?? []).some((h: any) => h.id === hotel.id);
+  const listed = new Map<string, any>((fresh.data.hotels ?? []).map((h: any) => [h.id, h]));
+  let failure: string | null = 'The hotel is no longer listed for those dates.';
+  for (const candidate of [plan.hotel, ...plan.alternatives]) {
+    const now = listed.get(candidate.id);
+    if (!now) continue;
+    const result = await deps.travel.advisor.checkout({ destination: request.destination.city, check_in: request.start, check_out: plan.end, adults: request.travellers, property_id: candidate.id, lodging: now.lodging ?? candidate.lodging ?? '' });
+    if (!result.opened) { failure = result.failure_reason ?? 'no checkout was available'; continue; }
+    if (candidate.id !== plan.hotel.id) { plan.swappedFrom = plan.hotel.name; plan.alternatives = [plan.hotel, ...plan.alternatives].filter(h => h.id !== candidate.id); plan.hotel = candidate; }
+    plan.checkout = { trip_id: result.trip_id, url: result.checkout_url };
+    return { opened: true, failure_reason: null };
+  }
+  return { opened: false, failure_reason: failure };
 }
 
 // charged: this task already took a payment, so a failed checkout must say so.
@@ -289,18 +305,19 @@ export async function bookHotel(deps: Deps, owner: string, intent: Extract<Inten
 
 // The hotel agent opens a pay-at-property checkout. It does not confirm a reservation, so we never say "booked".
 async function checkoutViaAdvisor(deps: Deps, owner: string, plan: Plan, notes: string[]) {
-  const { request, hotel } = plan;
+  const { request } = plan;
   if (!plan.checkout) {
-    const listed = await stillListed(deps, plan).catch(() => false);
-    const result = !listed ? { opened: false, trip_id: null, checkout_url: null, failure_reason: 'The hotel is no longer listed for those dates.' } : await deps.travel.advisor.checkout({ destination: request.destination.city, check_in: request.start, check_out: plan.end, adults: request.travellers, property_id: hotel.id });
+    const result = await openCheckout(deps, plan).catch((error: any) => ({ opened: false, failure_reason: String(error?.message ?? 'Checkout failed.') }));
     if (!result.opened) {
-      return [`# I could not open the checkout for ${hotel.name}`, '', `The hotel agent said: ${(result.failure_reason ?? 'no checkout was available').replace(/\.?$/, '.')} Nothing was booked.${deps.charged ? ' Your test payment for this step was already taken, so please ask the team to refund it.' : ' Nothing was charged.'}`, '',
-        hotel.url ? `You can still reserve it yourself on Hotels.com (free cancellation, pay at the property): ${hotel.url}` : 'You can search the same dates on Hotels.com.', ...(notes.length ? ['', ...notes] : []), ''].join('\n');
+      return [`# I could not open the checkout for ${plan.hotel.name}`, '', `The hotel agent said: ${(result.failure_reason ?? 'no checkout was available').replace(/\.?$/, '.')} Nothing was booked.${deps.charged ? ' Your test payment for this step was already taken, so please ask the team to refund it.' : ' Nothing was charged.'}`, '',
+        plan.hotel.url ? `You can still reserve it yourself on Hotels.com (free cancellation, pay at the property): ${plan.hotel.url}` : 'You can search the same dates on Hotels.com.', ...(notes.length ? ['', ...notes] : []), ''].join('\n');
     }
-    plan.checkout = { trip_id: result.trip_id, url: result.checkout_url }; await savePlan(deps, owner, plan);
+    await savePlan(deps, owner, plan);
   }
+  const hotel = plan.hotel, checkout = plan.checkout!;
+  if (plan.swappedFrom) notes.push(`${plan.swappedFrom} could not open a checkout, so I opened ${hotel.name} instead, the next best pick.`);
   return [`# Your checkout for ${hotel.name} is ready`, '', `- **Check in:** ${prettyDate(request.start)}`, `- **Check out:** ${prettyDate(plan.end)} (${hotel.nights} night${hotel.nights === 1 ? '' : 's'})`, `- **Price:** about ${money(hotel.total)}`,
-    plan.checkout.trip_id ? `- **Trip ID:** ${plan.checkout.trip_id}` : '', '', plan.checkout.url ? `**Finish your reservation here:** ${plan.checkout.url}` : '', '',
+    checkout.trip_id ? `- **Trip ID:** ${checkout.trip_id}` : '', '', checkout.url ? `**Finish your reservation here:** ${checkout.url}` : '', '',
     'The room is pay at the property with free cancellation. This opens the checkout; the hotel confirms your reservation when you complete it.', ...(notes.length ? ['', ...notes] : []), ''].filter((l, i, a) => l !== '' || a[i - 1] !== '').join('\n');
 }
 
@@ -327,8 +344,12 @@ export async function needsPayment(deps: Deps, owner: string, text: string, repl
   if (!intent || !intent.hotel) return false;
   const plan = (await loadPlan(deps, owner)).plan;
   if (!plan || plan.booked || plan.request.start <= today.toISOString().slice(0, 10)) return false;
-  // Never charge for a hotel the agent can no longer open a checkout for.
-  if (deps.travel.usesAdvisor && !(await stillListed(deps, plan).catch(() => false))) return false;
+  // Never charge unless a checkout is already open: the link is only handed over after the payment.
+  if (deps.travel.usesAdvisor && !plan.checkout) {
+    const opened = await openCheckout(deps, plan).catch(() => ({ opened: false }));
+    if (!opened.opened) return false;
+    await savePlan(deps, owner, plan);
+  }
   if (!deps.travel.usesAdvisor && !intent.guest && deps.config.GUEST_GIVEN_NAME === 'Alex' && deps.config.GUEST_FAMILY_NAME === 'Traveller') return false;
   return true;
 }
