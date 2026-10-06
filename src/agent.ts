@@ -21,7 +21,7 @@ export const instructions = (today: string, fee: string | undefined, saved: Plan
 You plan short trips and recommend hotels, and you can open a hotel checkout once the traveller confirms. You do not search or book flights, and you cannot change or cancel bookings or give visa, weather or insurance advice. Say so plainly when asked, and say what you can do.
 
 How to work:
-- Understand the request in plain language. If the destination or the arrival date is missing or unclear, call ask_user with one short question. Choose sensible defaults for anything else (3 days, 1 traveller) and say what you assumed. Plan for 1 to 4 adults, 2 to 14 days, arriving tomorrow or later. A trip of N days has N-1 nights (3 days is 2 nights, 10th to 12th is 3 days): pass nights = days - 1 to the tools and make the day-by-day list match.
+- Understand the request in plain language. If the destination or the arrival date is missing or unclear, call the ask_user tool with one short question (never ask in plain text, or the traveller cannot reply). Choose sensible defaults for anything else (3 days, 1 traveller) and say what you assumed. Plan for 1 to 4 adults, 2 to 14 days, arriving tomorrow or later. A trip of N days has N-1 nights (3 days is 2 nights, 10th to 12th is 3 days): pass nights = days - 1 to the tools and make the day-by-day list match.
 - A saved plan is only used for booking. A new request to plan a trip is always planned from what the traveller wrote now: if the arrival date is not in their words, ask for it. Never answer a plan request by repeating the saved plan.
 - To plan: call search_hotels, pick the best value hotel (good guest rating when known, free cancellation, fair price), then call save_plan with that hotel_id. Then write the plan in Markdown: a title, dates, the top pick with its total price and why, two alternatives, a short day-by-day list of things to do with rough costs, and what it costs. Use only prices and facts returned by tools. Never invent hotels, prices or availability.
 - Plans are free. ${fee ? `Booking costs ${fee}, charged only when the traveller confirms.` : 'Nothing is charged for plans.'} End a plan by telling the traveller to create a new task that says "Book the hotel" to open the checkout for the top pick.
@@ -44,7 +44,7 @@ function validate(a: z.infer<typeof stay>, today: string) {
 const generic = (a: z.infer<typeof stay>): Destination => ({ name: a.city, airport: '', city: a.city, country: a.country_code, country_code: a.country_code.toUpperCase(), aliases: [a.city.toLowerCase()], activities: [] });
 const request = (a: z.infer<typeof stay>) => ({ destination: generic(a), start: a.check_in, days: a.nights + 1, travellers: a.adults });
 
-export function tools(deps: Deps, owner: string, today: string, fee: string | undefined, out: { decision?: Decision }) {
+export function tools(deps: Deps, owner: string, today: string, fee: string | undefined, out: { decision?: Decision; saved?: boolean }) {
   return {
     search_hotels: tool({
       description: 'Search pay-at-property hotels with free cancellation for a city and dates. Returns up to 8 hotels with total prices.',
@@ -65,7 +65,7 @@ export function tools(deps: Deps, owner: string, today: string, fee: string | un
         try {
           const { plan } = await buildPlan(request(a), deps.travel, fee, a.hotel_id);
           if (plan.hotel.id !== a.hotel_id) return { error: 'That hotel_id was not in the search results. Search again and use an id from the results.' };
-          await savePlan(deps, owner, plan); out.decision = undefined;
+          await savePlan(deps, owner, plan); out.decision = undefined; out.saved = true;
           return { saved: true, trip_code: plan.id, hotel: plan.hotel.name, total: `${Number(plan.hotel.total.amount).toFixed(2)} ${plan.hotel.total.currency}` };
         } catch (error: any) { return { error: String(error?.message ?? 'Could not save the plan.').slice(0, 200) }; }
       },
@@ -105,7 +105,7 @@ export async function runAgent(text: string, deps: Deps, owner: string, options:
   const today = isoDay(options.today ?? new Date());
   const fee = deps.config.SOKOSUMI_PAID ? `${Number(deps.config.MASUMI_PRICE_ATOMIC) / 1e6} test USDM` : undefined;
   const saved = (await loadPlan(deps, owner)).plan;
-  const out: { decision?: Decision } = {};
+  const out: { decision?: Decision; saved?: boolean } = {};
   const result = await generateText({
     model: options.model ?? modelFor(deps.config), system: instructions(today, fee, saved), prompt: text,
     tools: tools(deps, owner, today, fee, out), maxRetries: 1, abortSignal: options.signal ?? AbortSignal.timeout(150000),
@@ -114,6 +114,8 @@ export async function runAgent(text: string, deps: Deps, owner: string, options:
   if (out.decision) return out.decision;
   const answer = result.text.trim();
   if (!answer) throw new Error('The agent returned no answer.');
+  // A reply that asks something without having planned anything is a question, so the task waits for the traveller.
+  if (!out.saved && /\?/.test(answer) && !/booking|checkout|booked/i.test(answer)) return { kind: 'ask', text: answer };
   const plan = (await loadPlan(deps, owner)).plan;
   return { kind: 'answer', text: answer, ...(plan ? { trip_code: plan.id } : {}) };
 }

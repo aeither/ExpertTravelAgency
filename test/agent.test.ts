@@ -79,3 +79,11 @@ test('the system prompt states the fee and the saved plan, and tells the model p
   const text = instructions('2026-10-07', '1 test USDM', undefined);
   assert.match(text, /1 test USDM/); assert.match(text, /No plan is saved/); assert.match(text, /Plans are free/); assert.match(text, /Never answer a plan request by repeating the saved plan/);
 });
+
+test('a question written as plain text is still treated as a question', async () => {
+  const f = fixture();
+  try {
+    const d = await runAgent('Plan a trip to Manila', f.deps, 'u1', { model: script(say('When are you arriving?')), today });
+    assert.deepEqual(d, { kind: 'ask', text: 'When are you arriving?' });
+  } finally { f.store.close(); }
+});
