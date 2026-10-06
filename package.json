@@ -20,7 +20,8 @@
     "verify:swagger": "tsx scripts/verify-swagger.ts",
     "demo:buy": "tsx scripts/demo-buy.ts",
     "smoke": "tsx scripts/smoke.ts",
-    "sokosumi:worker": "tsx scripts/sokosumi-worker.ts"
+    "sokosumi:worker": "tsx scripts/sokosumi-worker.ts",
+    "verify:receipt": "tsx scripts/verify-receipt.ts"
   },
   "dependencies": {
     "@fastify/rate-limit": "^11.2.0",

@@ -101,7 +101,14 @@ export async function buildApp(config: Config, options: { fetch?: Fetch; poll?: 
     timer = setInterval(() => { if (!ticking) ticking = masumi.tick().finally(() => { ticking = undefined; }); }, 5000);
     timer.unref();
   }
-  app.addHook('onClose', async () => { if (timer) clearInterval(timer); await ticking; await store.close(); });
+  // A long-running host (laptop or Railway) can poll Sokosumi itself; serverless hosts are driven by /v1/sokosumi/tick instead.
+  let coworkerTimer: ReturnType<typeof setInterval> | undefined;
+  let coworkerTicking: Promise<void> | undefined;
+  if (options.poll !== false && config.SOKOSUMI_POLL && sokosumi.configured) {
+    coworkerTimer = setInterval(() => { if (!coworkerTicking) coworkerTicking = sokosumi.tick().then(r => { if (r.status !== 'idle') app.log.info({ sokosumi: r.status }, 'coworker tick'); }).catch(e => app.log.error({ err: e?.code ?? 'TICK_FAILED' }, 'coworker tick failed')).finally(() => { coworkerTicking = undefined; }); }, 10000);
+    coworkerTimer.unref();
+  }
+  app.addHook('onClose', async () => { if (timer) clearInterval(timer); if (coworkerTimer) clearInterval(coworkerTimer); await ticking; await coworkerTicking; await store.close(); });
   await app.ready();
   return { app, store, travel, masumi };
 }

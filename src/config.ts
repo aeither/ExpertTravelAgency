@@ -16,6 +16,8 @@ const schema = z.object({
   SOKOSUMI_COWORKER_API_KEY: z.string().default(''),
   // Paid Sokosumi tasks: quote, masumiPayment, escrow before work, result hash, completion, collection.
   SOKOSUMI_PAID: flag,
+  // Poll Sokosumi from this process. Leave off on serverless hosts.
+  SOKOSUMI_POLL: flag,
   PUBLIC_SEARCH: flag,
   // Flights (Duffel) are switched off for now: the agent plans activities and recommends hotels only.
   FLIGHTS_ENABLED: flag,
