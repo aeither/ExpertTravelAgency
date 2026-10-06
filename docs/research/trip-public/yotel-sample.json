@@ -1,0 +1,654 @@
+{
+  "access": "anonymous_credentials_omit",
+  "anonymousStateConfirmed": true,
+  "diagnostics": [],
+  "hotels": [
+    {
+      "address": "366 Orchard Rd, Singapore, 238904, Singapore",
+      "amenities": [
+        {
+          "details": [
+            {
+              "text": [
+                "Private (exclusively for guests)"
+              ],
+              "title": "Type"
+            },
+            {
+              "text": [
+                "On-site parking"
+              ],
+              "title": "Location"
+            },
+            {
+              "text": [
+                "Charge, SGD 4.28 (approx. US$3.35) Hourly"
+              ],
+              "title": "Charges"
+            },
+            {
+              "text": [
+                "Not required"
+              ],
+              "title": "Reservations"
+            }
+          ],
+          "feeLabel": "Additional charge",
+          "name": "Private parking"
+        },
+        {
+          "details": [
+            {
+              "text": [
+                "Open all year"
+              ],
+              "title": "Opening times"
+            }
+          ],
+          "feeLabel": null,
+          "name": "Outdoor swimming pool"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "Gym"
+        },
+        {
+          "details": [],
+          "feeLabel": "Free",
+          "name": "Luggage storage"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "Bar"
+        },
+        {
+          "details": [
+            {
+              "text": [
+                "No additional info available"
+              ]
+            }
+          ],
+          "feeLabel": null,
+          "name": "Restaurant"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "Cafe"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "Taxi booking service"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "Business center"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "Wake-up call"
+        },
+        {
+          "details": [],
+          "feeLabel": "Free",
+          "name": "Wi-Fi in public areas"
+        },
+        {
+          "details": [
+            {
+              "text": [
+                "Open all year"
+              ]
+            }
+          ],
+          "feeLabel": null,
+          "name": "Opening times"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "Express check-in and check-out"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "Bellhop"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "English"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "Chinese (Mandarin)"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "Non-smoking floor"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "Elevator"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "Laundry service (on-site)"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "Ironing service"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "Laundry service (off-site)"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "Braille signs"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "Accessible rooms available"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "Wheelchairs available"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "First aid kit"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "CCTV in public areas"
+        },
+        {
+          "details": [],
+          "feeLabel": null,
+          "name": "First aid room"
+        }
+      ],
+      "city": "Singapore",
+      "coordinates": {
+        "latitude": 1.306441,
+        "longitude": 103.831243
+      },
+      "country": "Singapore",
+      "description": "With a stay at YOTEL Singapore Orchard Road (SG Clean), you'll be centrally located in Singapore, steps from Royal Thai Embassy and Shaw Centre. This 4-star hotel is 0.2 mi (0.3 km) from ION Orchard and 0.4 mi (0.6 km) from T Galleria by DFS.",
+      "id": "8497129",
+      "name": "Yotel Singapore Orchard Road",
+      "nearby": [
+        {
+          "descWithType": "Attraction: Singapore Botanic Gardens",
+          "distType": "WALK",
+          "distance": "1.6 km",
+          "poiName": "Singapore Botanic Gardens"
+        },
+        {
+          "descWithType": "Recreation: National Stadium",
+          "distType": "DRIVE",
+          "distance": "6.9 km",
+          "poiName": "National Stadium"
+        },
+        {
+          "descWithType": "Attraction: Universal Studios Singapore",
+          "distType": "DRIVE",
+          "distance": "8.4 km",
+          "poiName": "Universal Studios Singapore"
+        },
+        {
+          "descWithType": "Attraction: Fort Canning Park",
+          "distType": "DRIVE",
+          "distance": "3.5 km",
+          "poiName": "Fort Canning Park"
+        },
+        {
+          "descWithType": "Attraction: Sentosa",
+          "distType": "DRIVE",
+          "distance": "8.5 km",
+          "poiName": "Sentosa"
+        },
+        {
+          "descWithType": "Recreation: Singapore Indoor Stadium",
+          "distType": "DRIVE",
+          "distance": "8.6 km",
+          "poiName": "Singapore Indoor Stadium"
+        },
+        {
+          "descWithType": "Attraction: Clarke Quay",
+          "distType": "DRIVE",
+          "distance": "4.3 km",
+          "poiName": "Clarke Quay"
+        },
+        {
+          "descWithType": "Attraction: Chinatown",
+          "distType": "DRIVE",
+          "distance": "3.4 km",
+          "poiName": "Chinatown"
+        },
+        {
+          "descWithType": "Attraction: National Museum of Singapore",
+          "distType": "DRIVE",
+          "distance": "3.1 km",
+          "poiName": "National Museum of Singapore"
+        },
+        {
+          "descWithType": "Attraction: Merlion Park",
+          "distType": "DRIVE",
+          "distance": "4.7 km",
+          "poiName": "Merlion Park"
+        }
+      ],
+      "neighborhood": "Orchard Road",
+      "openedYear": "2017",
+      "photos": [
+        "https://ak-d.tripcdn.com/images/1mc6a12000bdolu05EF8A_R_960_660_R5_D.jpg",
+        "https://ak-d.tripcdn.com/images/0205d1200080wis6aB74C_R_339_206_R5_D.jpg",
+        "https://ak-d.tripcdn.com/images/02242120009f60g5w9F15_R_339_206_R5_D.jpg",
+        "https://ak-d.tripcdn.com/images/0201n1200080whvrcE3FA_R_339_206_R5_D.jpg",
+        "https://ak-d.tripcdn.com/images/220c0z000000mzi91100D_R_339_206_R5_D.jpg",
+        "https://ak-d.tripcdn.com/images/02201120008utspogF011_R_339_206_R5_D.jpg",
+        "https://ak-d.tripcdn.com/images/02213120008utsqmsF48D_R_339_206_R5_D.jpg",
+        "https://ak-d.tripcdn.com/images/2206170000010ysz2E4F8_R_339_206_R5_D.jpg",
+        "https://ak-d.tripcdn.com/images/22041f000001grkpw5985_R_339_206_R5_D.jpg",
+        "https://ak-d.tripcdn.com/images/220t1f000001gsn5551E1_R_339_206_R5_D.jpg",
+        "https://ak-d.tripcdn.com/images/02228120008utsnve244F_R_339_206_R5_D.jpg"
+      ],
+      "policies": {
+        "ageLimit": [
+          "Age Requirements",
+          "The main guest checking in must be at least 18 years old"
+        ],
+        "breakfast": [
+          "Breakfast",
+          "Option: Buffet",
+          "Cuisine: Western, Chinese",
+          "Opening hours: [Mon - Sun] 06:30-10:30 Open ",
+          "Children 12 years old and under",
+          "SGD 14.39 (approx. US$11.26) per person",
+          "",
+          "Children 13\u201317 years old",
+          "SGD 21.58 (approx. US$16.88) per person",
+          "Adult",
+          "Contact the property to see if extra breakfast is available. If so, you can pay for it at the property."
+        ],
+        "checkInAndOut": [
+          "Check-in and Check-out Times",
+          "Check-in: ",
+          "After 15:00",
+          "Check-out: ",
+          "Before 11:00",
+          "Front desk hours: 24/7"
+        ],
+        "childPolicy": [
+          "Child policies",
+          "Children of all ages are welcome at this property.",
+          "Additional fees may be charged for children using existing beds. Add the number of children to get a more accurate price."
+        ],
+        "cribAndExtraBed": [
+          "Cribs and Extra Beds",
+          "Extra bed and crib policies may vary according to room type. Please refer to the room type details for more information."
+        ],
+        "deposit": [
+          "Deposit Policy",
+          "Deposit",
+          "No deposit required by the property"
+        ],
+        "pet": [
+          "Pets",
+          "Pets are not allowed"
+        ]
+      },
+      "rateEvidence": {
+        "embeddedResponsePresent": false,
+        "search": {
+          "adult": 2,
+          "checkIn": "",
+          "checkOut": "",
+          "roomQuantity": 1
+        }
+      },
+      "rateStatus": "not_extracted",
+      "rates": [],
+      "rating": {
+        "dimensions": [
+          {
+            "label": "Location",
+            "value": 9.4,
+            "sameTypeAverageReported": 8.8
+          },
+          {
+            "label": "Amenities",
+            "value": 8.7,
+            "sameTypeAverageReported": 8.4
+          },
+          {
+            "label": "Service",
+            "value": 8.9,
+            "sameTypeAverageReported": 8.6
+          },
+          {
+            "label": "Cleanliness",
+            "value": 9.3,
+            "sameTypeAverageReported": 8.8
+          }
+        ],
+        "reviewCount": 3455,
+        "scale": 10,
+        "value": 9.1
+      },
+      "rooms": [
+        {
+          "amenities": [
+            "Air conditioning",
+            "Private bathroom",
+            "TV",
+            "Tea bags",
+            "Toothbrushes"
+          ],
+          "area": "14m\u00b2",
+          "beds": "1 Double bed",
+          "floor": "Floor: 11-26",
+          "id": "52684850",
+          "name": "Premium Queen Room",
+          "photos": [
+            "https://aw-d.tripcdn.com/images/0223p120009c4ybub91D0.jpg",
+            "https://aw-d.tripcdn.com/images/02271120009c4yrn5768C.jpg",
+            "https://aw-d.tripcdn.com/images/0220g120009c4yg55E8FD.jpg",
+            "https://aw-d.tripcdn.com/images/0204m120008a6ygvu9EB2.jpg",
+            "https://aw-d.tripcdn.com/images/0586112000sp9iqt24F73.jpg",
+            "https://aw-d.tripcdn.com/images/0583b12000sjsxouq900B.jpg",
+            "https://aw-d.tripcdn.com/images/0582412000spf0ao6E1E4.jpg",
+            "https://aw-d.tripcdn.com/images/0580x12000sgqwdoyA6CF.jpg"
+          ],
+          "smoking": "Non-smoking",
+          "window": "Fixed window",
+          "personCapacityReported": 2,
+          "childCapacityReported": 1
+        },
+        {
+          "amenities": [
+            "Air conditioning",
+            "Private bathroom",
+            "TV",
+            "Tea bags",
+            "Toothbrushes"
+          ],
+          "area": "14m\u00b2",
+          "beds": "1 Queen bed",
+          "floor": "Floor: 11-29",
+          "id": "52685011",
+          "name": "Premium Queen View Room",
+          "photos": [
+            "https://aw-d.tripcdn.com/images/0223p120009c4ybub91D0.jpg",
+            "https://aw-d.tripcdn.com/images/0220g120009c4yg55E8FD.jpg",
+            "https://aw-d.tripcdn.com/images/0222k120009f60ici952D.jpg",
+            "https://aw-d.tripcdn.com/images/02271120009c4yrn5768C.jpg",
+            "https://aw-d.tripcdn.com/images/0583b12000sjsxouq900B.jpg",
+            "https://aw-d.tripcdn.com/images/0204m120008a6ygvu9EB2.jpg",
+            "https://aw-d.tripcdn.com/images/0580x12000sgqwdoyA6CF.jpg",
+            "https://aw-d.tripcdn.com/images/02063120008a6xswl2CFB.jpg",
+            "https://aw-d.tripcdn.com/images/0582412000spf0ao6E1E4.jpg"
+          ],
+          "smoking": "Non-smoking",
+          "window": "Fixed window",
+          "personCapacityReported": 2,
+          "childCapacityReported": 1
+        },
+        {
+          "amenities": [
+            "Air conditioning",
+            "Private bathroom",
+            "TV",
+            "Tea bags",
+            "Toothbrushes"
+          ],
+          "area": "14m\u00b2",
+          "beds": "1 Queen bed and 1 Bunk bed",
+          "floor": "Floor: 11-29",
+          "id": "52685352",
+          "name": "Premium Triple Room",
+          "photos": [
+            "https://aw-d.tripcdn.com/images/0202b1200080wim0nC479.jpg",
+            "https://aw-d.tripcdn.com/images/0204l120008a6yqy07408.jpg",
+            "https://aw-d.tripcdn.com/images/0204b120008a6yo85C3DA.jpg",
+            "https://aw-d.tripcdn.com/images/0204m120008a6ygvu9EB2.jpg",
+            "https://aw-d.tripcdn.com/images/0586112000sp9iqt24F73.jpg",
+            "https://aw-d.tripcdn.com/images/0583d12000sp8b1o7CD66.jpg"
+          ],
+          "smoking": "Non-smoking",
+          "window": "Fixed window",
+          "personCapacityReported": 3,
+          "childCapacityReported": 2
+        },
+        {
+          "amenities": [
+            "Air conditioning",
+            "Private bathroom",
+            "TV",
+            "Tea bags",
+            "Toothbrushes"
+          ],
+          "area": "14m\u00b2",
+          "beds": "1 Queen bed and 1 Bunk bed",
+          "floor": "Floor: 11-29",
+          "id": "52685770",
+          "name": "Premium Triple View Room",
+          "photos": [
+            "https://aw-d.tripcdn.com/images/0205d1200080wis6aB74C.jpg",
+            "https://aw-d.tripcdn.com/images/0204b120008a6yo85C3DA.jpg",
+            "https://aw-d.tripcdn.com/images/0204l120008a6yqy07408.jpg",
+            "https://aw-d.tripcdn.com/images/0204m120008a6ygvu9EB2.jpg",
+            "https://aw-d.tripcdn.com/images/0583d12000sp8b1o7CD66.jpg"
+          ],
+          "smoking": "Non-smoking",
+          "window": "Fixed window",
+          "personCapacityReported": 3,
+          "childCapacityReported": 2
+        },
+        {
+          "amenities": [
+            "Air conditioning",
+            "Private bathroom",
+            "TV",
+            "Tea bags",
+            "Toothbrushes"
+          ],
+          "area": "16-21m\u00b2",
+          "beds": "1 Queen bed",
+          "floor": "Floor: 30",
+          "id": "52686121",
+          "name": "First Class Queen",
+          "photos": [
+            "https://aw-d.tripcdn.com/images/02242120009f60g5w9F15.jpg",
+            "https://aw-d.tripcdn.com/images/02271120009c4yrn5768C.jpg",
+            "https://aw-d.tripcdn.com/images/02063120008a6xswl2CFB.jpg",
+            "https://aw-d.tripcdn.com/images/0220o120009c973u2930E.jpg",
+            "https://aw-d.tripcdn.com/images/0220g120009c4yg55E8FD.jpg",
+            "https://aw-d.tripcdn.com/images/0582412000spf0ao6E1E4.jpg",
+            "https://aw-d.tripcdn.com/images/0580x12000sgqwdoyA6CF.jpg",
+            "https://aw-d.tripcdn.com/images/0586112000sp9iqt24F73.jpg",
+            "https://aw-d.tripcdn.com/images/0583d12000sp8b1o7CD66.jpg"
+          ],
+          "smoking": "Non-smoking",
+          "window": "Fixed window",
+          "personCapacityReported": 2,
+          "childCapacityReported": 1
+        },
+        {
+          "amenities": [
+            "Air conditioning",
+            "Private bathroom",
+            "TV",
+            "Tea bags",
+            "Toothbrushes"
+          ],
+          "area": "56-74m\u00b2",
+          "beds": "1 King bed and 1 Sofa bed",
+          "floor": "Floor: 30",
+          "id": "52687073",
+          "name": "VIP King Suite View",
+          "photos": [
+            "https://aw-d.tripcdn.com/images/0220s120009f606y86A87.jpg",
+            "https://aw-d.tripcdn.com/images/02201120009f606sm0762.jpg",
+            "https://aw-d.tripcdn.com/images/0226d120009f609df9D87.jpg",
+            "https://aw-d.tripcdn.com/images/0222o120009f60fhkA390.jpg",
+            "https://aw-d.tripcdn.com/images/0225m120009f605102EBE.jpg",
+            "https://aw-d.tripcdn.com/images/02222120009f60bl4201D.jpg",
+            "https://aw-d.tripcdn.com/images/0220x120009f608rw3131.jpg",
+            "https://aw-d.tripcdn.com/images/0221c120009f607rlCEF9.jpg",
+            "https://aw-d.tripcdn.com/images/02271120009c4yrn5768C.jpg",
+            "https://aw-d.tripcdn.com/images/0202l1200080whzej7449.jpg"
+          ],
+          "smoking": "Non-smoking",
+          "window": "Fixed window",
+          "personCapacityReported": 4,
+          "childCapacityReported": 3
+        },
+        {
+          "amenities": [
+            "Air conditioning",
+            "Private bathroom",
+            "TV",
+            "Tea bags",
+            "Toothbrushes"
+          ],
+          "area": "28-37m\u00b2",
+          "beds": "1 King bed and 1 Sofa bed",
+          "floor": "Floor: 30",
+          "id": "61571840",
+          "name": "First Class King",
+          "photos": [
+            "https://aw-d.tripcdn.com/images/0201n1200080whvrcE3FA.jpg",
+            "https://aw-d.tripcdn.com/images/020151200099u4dam8007.jpg",
+            "https://aw-d.tripcdn.com/images/020731200099u4fygFCE4.jpg",
+            "https://aw-d.tripcdn.com/images/0204b120008a6yo85C3DA.jpg",
+            "https://aw-d.tripcdn.com/images/0583d12000sp8b1o7CD66.jpg"
+          ],
+          "smoking": "Non-smoking",
+          "window": "Fixed window",
+          "personCapacityReported": 3,
+          "childCapacityReported": 2
+        },
+        {
+          "amenities": [
+            "Air conditioning",
+            "Private bathroom",
+            "TV",
+            "Tea bags",
+            "Toothbrushes"
+          ],
+          "area": "14m\u00b2",
+          "beds": "1 Queen bed",
+          "id": "464054653",
+          "name": "Premium Plus Queen View (with Desk)",
+          "photos": [
+            "https://aw-d.tripcdn.com/images/1mc6a12000kkmdkuh9F33.jpg",
+            "https://aw-d.tripcdn.com/images/1mc4912000kkm97hp23D9.jpg",
+            "https://aw-d.tripcdn.com/images/1mc6812000kkmgfml6285.jpg",
+            "https://aw-d.tripcdn.com/images/1mc1n12000kkmgzo2771E.jpg"
+          ],
+          "smoking": "Non-smoking",
+          "window": "Fixed window",
+          "personCapacityReported": 2,
+          "childCapacityReported": 1
+        },
+        {
+          "amenities": [
+            "Air conditioning",
+            "Private bathroom",
+            "TV",
+            "Tea bags",
+            "Toothbrushes"
+          ],
+          "area": "14m\u00b2",
+          "beds": "1 Queen bed",
+          "id": "464054695",
+          "name": "Premium Queen Plus (with Desk)",
+          "photos": [
+            "https://aw-d.tripcdn.com/images/1mc4912000kkm97hp23D9.jpg",
+            "https://aw-d.tripcdn.com/images/1mc0j12000kkmdf86B9BB.jpg",
+            "https://aw-d.tripcdn.com/images/1mc6812000kkmgfml6285.jpg",
+            "https://aw-d.tripcdn.com/images/1mc1n12000kkmgzo2771E.jpg"
+          ],
+          "smoking": "Non-smoking",
+          "window": "Fixed window",
+          "personCapacityReported": 2,
+          "childCapacityReported": 1
+        },
+        {
+          "amenities": [
+            "Hair dryer"
+          ],
+          "area": "14m\u00b2",
+          "beds": "1 Queen bed",
+          "id": "588304240",
+          "name": "Premium Plus Queen View",
+          "photos": [
+            "https://aw-d.tripcdn.com/images/0221i12000k3jopub960E.jpg",
+            "https://aw-d.tripcdn.com/images/1mc0612000tiqxmvv450C.jpg",
+            "https://aw-d.tripcdn.com/images/0220212000l0z74g40FD6.jpg",
+            "https://aw-d.tripcdn.com/images/0223m12000tnszm5k21E3.jpg",
+            "https://aw-d.tripcdn.com/images/0220512000tnehdvx5B59.jpg",
+            "https://aw-d.tripcdn.com/images/02244120009zqv7l501A6.jpg",
+            "https://aw-d.tripcdn.com/images/0220312000iry4ublF33E.jpg",
+            "https://aw-d.tripcdn.com/images/0221j12000dm7qx4l8A67.jpg",
+            "https://aw-d.tripcdn.com/images/0221e12000k27lmccD3C1.jpg"
+          ],
+          "smoking": "Non-smoking",
+          "window": "Fixed window",
+          "personCapacityReported": 2,
+          "childCapacityReported": -1
+        },
+        {
+          "amenities": [
+            "Hair dryer"
+          ],
+          "area": "14m\u00b2",
+          "beds": "1 Queen bed",
+          "id": "588305034",
+          "name": "Premium Queen Plus",
+          "photos": [
+            "https://aw-d.tripcdn.com/images/0221i12000k3jopub960E.jpg",
+            "https://aw-d.tripcdn.com/images/0224f12000t8k2z2x3D5F.jpg",
+            "https://aw-d.tripcdn.com/images/0223m12000tnszm5k21E3.jpg",
+            "https://aw-d.tripcdn.com/images/1mc5i12000tiqyx7wB836.jpg",
+            "https://aw-d.tripcdn.com/images/0220512000tnehdvx5B59.jpg",
+            "https://aw-d.tripcdn.com/images/0220312000iry4ublF33E.jpg",
+            "https://aw-d.tripcdn.com/images/0221j12000dm7qx4l8A67.jpg",
+            "https://aw-d.tripcdn.com/images/0221e12000k27lmccD3C1.jpg"
+          ],
+          "smoking": "Non-smoking",
+          "window": "Fixed window",
+          "personCapacityReported": 2,
+          "childCapacityReported": -1
+        }
+      ],
+      "source": "Trip.com public frontend hydration",
+      "sourceUrl": "https://www.trip.com/hotels/singapore-hotel-detail-8497129/yotel-singapore-orchard-road/",
+      "stars": 4,
+      "transit": "330m from metro station (Orchard), approx. 5 mins on foot",
+      "topImageCountReported": 11
+    }
+  ],
+  "observedAt": "2026-10-06T11:30:10.845Z",
+  "schemaVersion": 1
+}
