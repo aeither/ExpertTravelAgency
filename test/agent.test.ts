@@ -77,5 +77,5 @@ test('past dates and made-up hotel ids are rejected by the tools, not trusted fr
 
 test('the system prompt states the fee and the saved plan, and tells the model plans are free', () => {
   const text = instructions('2026-10-07', '1 test USDM', undefined);
-  assert.match(text, /1 test USDM/); assert.match(text, /No plan is saved/); assert.match(text, /Plans are free/);
+  assert.match(text, /1 test USDM/); assert.match(text, /No plan is saved/); assert.match(text, /Plans are free/); assert.match(text, /Never answer a plan request by repeating the saved plan/);
 });
