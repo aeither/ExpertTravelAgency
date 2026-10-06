@@ -227,7 +227,15 @@ function planAnswer(plan: Plan, fee?: string) {
   return out.join('\n') + '\n';
 }
 
-export interface Deps { travel: Travel; store: Storage; config: Config }
+// Search again with the plan's own dates and group: the hotel agent only opens a checkout for a stay it lists right now.
+async function stillListed(deps: Deps, plan: Plan) {
+  const { request, hotel } = plan;
+  const fresh: any = await deps.travel.stays({ check_in_date: request.start, check_out_date: plan.end, rooms: [{ adults: request.travellers }], location: { city: request.destination.city, country_code: request.destination.country_code }, currency: plan.currency, guest_nationality: 'US', limit: 20 });
+  return (fresh.data.hotels ?? []).some((h: any) => h.id === hotel.id);
+}
+
+// charged: this task already took a payment, so a failed checkout must say so.
+export interface Deps { travel: Travel; store: Storage; config: Config; charged?: boolean }
 const planKey = (owner: string) => `latest-plan:${owner}`;
 
 export async function savePlan(deps: Deps, owner: string, plan: Plan) {
@@ -283,9 +291,10 @@ export async function bookHotel(deps: Deps, owner: string, intent: Extract<Inten
 async function checkoutViaAdvisor(deps: Deps, owner: string, plan: Plan, notes: string[]) {
   const { request, hotel } = plan;
   if (!plan.checkout) {
-    const result = await deps.travel.advisor.checkout({ destination: request.destination.city, check_in: request.start, check_out: plan.end, adults: request.travellers, property_id: hotel.id });
+    const listed = await stillListed(deps, plan).catch(() => false);
+    const result = !listed ? { opened: false, trip_id: null, checkout_url: null, failure_reason: 'The hotel is no longer listed for those dates.' } : await deps.travel.advisor.checkout({ destination: request.destination.city, check_in: request.start, check_out: plan.end, adults: request.travellers, property_id: hotel.id });
     if (!result.opened) {
-      return [`# I could not open the checkout for ${hotel.name}`, '', `The hotel agent said: ${(result.failure_reason ?? 'no checkout was available').replace(/\.?$/, '.')} Nothing was booked.${deps.config.SOKOSUMI_PAID ? ' Your test payment for this step was already taken, so please ask the team to refund it.' : ' Nothing was charged.'}`, '',
+      return [`# I could not open the checkout for ${hotel.name}`, '', `The hotel agent said: ${(result.failure_reason ?? 'no checkout was available').replace(/\.?$/, '.')} Nothing was booked.${deps.charged ? ' Your test payment for this step was already taken, so please ask the team to refund it.' : ' Nothing was charged.'}`, '',
         hotel.url ? `You can still reserve it yourself on Hotels.com (free cancellation, pay at the property): ${hotel.url}` : 'You can search the same dates on Hotels.com.', ...(notes.length ? ['', ...notes] : []), ''].join('\n');
     }
     plan.checkout = { trip_id: result.trip_id, url: result.checkout_url }; await savePlan(deps, owner, plan);
@@ -318,6 +327,8 @@ export async function needsPayment(deps: Deps, owner: string, text: string, repl
   if (!intent || !intent.hotel) return false;
   const plan = (await loadPlan(deps, owner)).plan;
   if (!plan || plan.booked || plan.request.start <= today.toISOString().slice(0, 10)) return false;
+  // Never charge for a hotel the agent can no longer open a checkout for.
+  if (deps.travel.usesAdvisor && !(await stillListed(deps, plan).catch(() => false))) return false;
   if (!deps.travel.usesAdvisor && !intent.guest && deps.config.GUEST_GIVEN_NAME === 'Alex' && deps.config.GUEST_FAMILY_NAME === 'Traveller') return false;
   return true;
 }

@@ -136,7 +136,7 @@ export class Sokosumi {
         }
         if (state.phase === 'searching') {
           try {
-            const deps = { travel: this.travel, store: this.store, config: this.config }, url = 'https://origin-travel-agent.vercel.app';
+            const deps = { travel: this.travel, store: this.store, config: this.config, charged: !!paid }, url = 'https://origin-travel-agent.vercel.app';
             const earlier = [state.input, state.context].filter(Boolean).join(' ');
             const output = state.reply !== undefined ? await answerFollowUp(earlier, state.reply, deps, owner, url) : await answerTask(earlier, deps, owner, url);
             state = { ...state, phase: 'result-saved', answer: output.answer, summary: output.summary }; await save();

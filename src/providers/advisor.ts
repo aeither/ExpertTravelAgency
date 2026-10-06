@@ -25,7 +25,7 @@ export class Advisor {
   }
   async searchStays(input: StaySearch) {
     const nights = Math.max(1, Math.round((Date.parse(input.check_out_date) - Date.parse(input.check_in_date)) / 86400000));
-    const found = await this.post('/hotels/search', { destination: 'city' in input.location ? input.location.city : '', check_in: input.check_in_date, check_out: input.check_out_date, adults: input.rooms?.[0]?.adults ?? 2 });
+    const found = await this.post('/hotels/search', { destination: 'city' in input.location ? input.location.city : '', check_in: input.check_in_date, check_out: input.check_out_date, adults: input.rooms?.[0]?.adults ?? 2, payment_type: 'PAY_LATER', lodging: '' });
     const hotels = (found.stays ?? []).flatMap((s: any) => {
       const nightly = price(s.price);
       if (!nightly || !s.property_id) return [];
