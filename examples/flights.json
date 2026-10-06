@@ -1,0 +1,6 @@
+{
+  "slices": [{ "origin": "SIN", "destination": "BKK", "departure_date": "2026-11-10" }],
+  "passengers": [{ "type": "adult" }],
+  "cabin_class": "economy",
+  "max_connections": 0
+}

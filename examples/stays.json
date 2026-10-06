@@ -1,0 +1,8 @@
+{
+  "check_in_date": "2026-12-01",
+  "check_out_date": "2026-12-03",
+  "rooms": [{ "adults": 2 }],
+  "location": { "city": "Singapore", "country_code": "SG" },
+  "currency": "USD",
+  "limit": 5
+}
