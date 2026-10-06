@@ -24,17 +24,22 @@ async function api(path: string, body?: unknown) {
 async function payOnChain(job: any) {
   const url = process.env.BUYER_PAYMENT_URL, token = process.env.BUYER_PAYMENT_TOKEN;
   if (!url || !token) throw new Error('Live settlement needs BUYER_PAYMENT_URL and BUYER_PAYMENT_TOKEN (a Masumi Payment Service with a funded purchasing wallet).');
-  // Field names follow the Payment Service /purchase schema; unverified until a buyer wallet is available.
+  // Echo the seller's signed terms unchanged; the contract rejects any altered field.
+  const terms = job.payment_request;
   const response = await fetch(url.replace(/\/$/, '') + '/purchase', {
     method: 'POST', headers: { 'content-type': 'application/json', token },
     body: JSON.stringify({
       identifierFromPurchaser: job.identifierFromPurchaser, network: 'Preprod', sellerVkey: job.sellerVKey, paymentType: 'Web3CardanoV2',
+      paymentSourceType: 'Web3CardanoV2', supportedPaymentSourceIndex: job.supportedPaymentSourceIndex,
       blockchainIdentifier: job.blockchainIdentifier, payByTime: String(job.payByTime), submitResultTime: String(job.submitResultTime),
       unlockTime: String(job.unlockTime), externalDisputeUnlockTime: String(job.externalDisputeUnlockTime),
       agentIdentifier: job.agentIdentifier, inputHash: job.input_hash,
+      Amounts: terms.RequestedFunds.map(({ amount, unit }: any) => ({ amount, unit })),
+      PaymentSource: { network: 'Preprod', smartContractAddress: terms.PaymentSource.smartContractAddress, policyId: terms.PaymentSource.policyId },
     }),
   });
-  if (!response.ok) throw new Error(`Purchase rejected: HTTP ${response.status}`);
+  if (response.ok) { const purchase: any = await response.json().catch(() => ({})); log('Purchase accepted', String(purchase?.data?.id ?? '')); return; }
+  throw new Error(`Purchase rejected: HTTP ${response.status} ${(await response.text()).slice(0, 300)}`);
 }
 
 try {
@@ -45,7 +50,7 @@ try {
   log('Settlement', mode === 'simulated' ? 'SIMULATED rehearsal, no real funds' : 'Cardano Preprod escrow');
 
   const request = {
-    flights: { slices: [{ origin, destination, departure_date: day(30) }], passengers: [{ type: 'adult' }], max_connections: 1 },
+    ...(caps.flights?.enabled ? { flights: { slices: [{ origin, destination, departure_date: day(30) }], passengers: [{ type: 'adult' }], max_connections: 1 } } : {}),
     stays: { check_in_date: day(30), check_out_date: day(33), rooms: [{ adults: 1 }], location: { city: cityName, country_code: countryCode }, currency: 'EUR', limit: 10 },
   };
   const input = { trip_request_json: JSON.stringify(request) };
@@ -59,7 +64,7 @@ try {
   else { await payOnChain(job); log('Purchase submitted', 'waiting for FundsLocked on Cardano'); }
 
   let status: any, phase = '';
-  for (let i = 0; i < 200; i++) {
+  for (let i = 0; i < 600; i++) {
     status = await api(`/status?job_id=${job.id}`);
     if (status.phase !== phase) { phase = status.phase; log('Agent phase', `${status.phase} (${status.payment_state ?? 'no payment yet'})`); }
     if (status.status === 'completed') break;

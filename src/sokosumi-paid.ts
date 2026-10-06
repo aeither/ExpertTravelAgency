@@ -69,8 +69,8 @@ export class PaidFlow {
       const request = {
         network: 'Preprod', agentIdentifier: config.MASUMI_AGENT_IDENTIFIER, paymentSourceType: 'Web3CardanoV2', supportedPaymentSourceIndex: config.MASUMI_SUPPORTED_SOURCE_INDEX,
         inputHash: taskInputHash(state.input, nonce), identifierFromPurchaser: nonce, RequestedFunds: [{ amount: config.MASUMI_PRICE_ATOMIC, unit: config.MASUMI_TOKEN_UNIT }],
-        payByTime: new Date(now + 10 * MINUTE).toISOString(), submitResultTime: new Date(now + 25 * MINUTE).toISOString(),
-        unlockTime: new Date(now + 40 * MINUTE).toISOString(), externalDisputeUnlockTime: new Date(now + 55 * MINUTE).toISOString(),
+        payByTime: new Date(now + 10 * MINUTE).toISOString(), submitResultTime: new Date(now + 16 * MINUTE).toISOString(),
+        unlockTime: new Date(now + 32 * MINUTE).toISOString(), externalDisputeUnlockTime: new Date(now + 48 * MINUTE).toISOString(),
         metadata: JSON.stringify({ taskId: task.id }),
       };
       p = { stage: 'terms-pending', nonce, request }; await this.persist(state, p);
