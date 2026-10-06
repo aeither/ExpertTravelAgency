@@ -1,36 +1,60 @@
-# Origin travel API
+# Origin: an AI travel agent you can hire and pay on Cardano
 
-Sokosumi execution rehearsals work through the dedicated Coworker worker. See [worker setup and judge access](docs/sokosumi.md) and [submission readiness](docs/submission-readiness.md). Event approval and paid seller-receipt proof remain outstanding.
+**Origin searches flights and hotels, then books them.** A buyer agent pays into escrow, Origin runs live supplier searches, commits to its answer with a hash, and the buyer verifies the proof. The buyer can then book the flight or hotel it picked, inside a budget cap it set.
 
-Hosted API: https://origin-travel-agent.vercel.app — public docs and search, with Neon PostgreSQL storage. See [deployment and managed Masumi registration](docs/deployment.md). Paid Masumi registration is pending.
+Built for the TOKEN2049 Origins hackathon, Cardano – Agentic Commerce track, on [Masumi](https://www.masumi.network) (MIP-003) and [Sokosumi](https://sokosumi.com).
 
-API endpoints for flight and hotel search, with flight booking routes. The AI agent can call these endpoints later. The server uses Node.js 24 or later, TypeScript, and Fastify.
+- **Live demo:** https://origin-travel-agent.vercel.app/demo-ui
+- **API docs:** https://origin-travel-agent.vercel.app/docs
+- **Coworker runner:** https://origin-travel-agent.vercel.app/coworker
 
-## Current state
+## What it does
 
-| Capability | Provider | Evidence |
-| --- | --- | --- |
-| Flight search and offer refresh | Duffel | Verified with the supplier test API |
-| Flight booking | Duffel | Verified test order and duplicate request replay |
-| Hotel search with room rates | LiteAPI (Nuitee) | Verified against the supplier sandbox; needs `LITEAPI_API_KEY` |
-| Hotel booking | LiteAPI | Verified with a sandbox booking, budget cap, and idempotent replay |
-| Buyer demo page, buyer agent, smoke test | This repo | `/demo-ui`, `npm run demo:buy`, `npm run smoke`; see [the demo runbook](docs/demo.md) |
-| Paid search on Cardano | Masumi MIP-003 and MPS V2 | Local protocol tests pass; node configuration and on-chain receipt unverified |
+```
+Buyer agent ──pays──▶ Escrow ──locks funds──▶ Origin ──parallel search──▶ Duffel (flights)
+     ▲                                          │                        LiteAPI (hotels)
+     │                                          ▼
+     └──── verifies result hash ◀──── shortlist + offer IDs + proof
+     │
+     └──── books chosen offer (Idempotency-Key, confirm, max_total) ──▶ supplier order
+```
 
-Flight test offers use sandbox inventory. They do not prove production airline pricing or ticket issuance. LiteAPI sandbox hotel rates do not prove production availability. Demo mode returns synthetic data with `provider: demo` and `environment: demo`.
+| | |
+| --- | --- |
+| **Search** | Flights (Duffel) and hotel room rates (LiteAPI) in one call: `POST /v1/trips/search` |
+| **Book** | Flights through Duffel orders and hotels through LiteAPI prebook and book |
+| **Pay** | Paid search through Masumi MIP-003 and MPS V2, with escrow before work starts |
+| **Prove** | Input and result hashes are recorded so the buyer can recompute and check them |
+| **Stay safe** | Every booking needs a budget cap, explicit confirmation and an idempotency key |
 
-Private supplier credentials are in `.env.local` and `.data/`. Git ignores both locations. The Duffel test account uses the supplied project details and Italy. No production booking or crypto transfer was made.
+## Why it is built this way
 
-## Run
+- **Agents buy from agents.** The endpoints are plain JSON with an OpenAPI schema, so another agent can call them without a human.
+- **Money is guarded.** A booking fails if the offer exceeds `max_total`. A repeated request with the same key returns the saved result instead of booking twice.
+- **Honest labelling.** Every response carries `provider`, `environment` and `observed_at`. Demo data is marked `provider: demo`. Live mode never substitutes demo inventory.
+
+## Talk to it (Sokosumi)
+
+Create a task for the Expert Travel Agency coworker and write in plain words:
+
+1. `Plan a trip to Cebu for 3 days from 9 October` → the best hotels, a day-by-day plan with things to do, and the cost. Flights are not searched for now.
+2. `I like it, book the hotel` → books the planned hotel and replies with the booking number and confirmation code. Asking again returns the same booking and never books twice.
+
+The agent assumes 1 traveller unless the message says otherwise (`Bangkok, 20 October, 4 days, 2 people`). To book under a name, add `under Maria Santos`. JSON trip requests still work. Flight booking is not available from chat yet. Cebu, Bangkok, Singapore, Bali and Manila have curated activities.
+
+## Try it
+
+**In the browser:** open `/demo-ui`, pick Singapore → Bangkok, click **Hire the agent**. The page steps through signed terms, locked funds, search, result hash and buyer verification.
+
+**From a terminal:**
 
 ```sh
 npm ci
-npm run dev
+npm run dev                      # API at http://127.0.0.1:3026, docs at /docs
+npm run demo                     # no credentials needed; results are labelled simulated
+npm run demo:buy                 # autonomous buyer agent doing the full flow
+npm run smoke -- --book          # every route on the hosted API, including sandbox bookings
 ```
-
-The API listens at `http://127.0.0.1:3026`. Open `http://127.0.0.1:3026/docs` for request schemas and interactive calls. The schema is also in [docs/openapi.json](docs/openapi.json).
-
-For a new checkout, copy `.env.example` to `.env.local` and add supplier credentials. Get a free LiteAPI sandbox key from https://dashboard.liteapi.travel. Do not put credentials in chat or Git.
 
 ```sh
 curl -s http://127.0.0.1:3026/v1/capabilities
@@ -40,51 +64,66 @@ curl -s http://127.0.0.1:3026/v1/stays/search \
   -H 'Content-Type: application/json' --data-binary @examples/stays.json
 ```
 
-Change the example dates when needed.
+Change the example dates when needed. For live suppliers, copy `.env.example` to `.env.local` and add credentials. A free LiteAPI sandbox key is available at https://dashboard.liteapi.travel. Do not put credentials in chat or Git.
 
-Set `API_KEY` before public use and send `Authorization: Bearer <key>`. A public `HOST` requires an API key of at least 24 characters. The default host is local.
-
-## Routes
+## API
 
 | Method | Route | Use |
 | --- | --- | --- |
+| POST | `/v1/trips/search` | Search flights and hotels in parallel |
 | POST | `/v1/flights/search` | Get offers and passenger IDs |
 | GET | `/v1/flights/offers/:id` | Refresh price and expiry |
-| POST | `/v1/flights/bookings` | Create an order using the Duffel balance |
-| POST | `/v1/stays/search` | Search hotels by city or coordinates; returns room rates, board, cancellation terms, and totals |
-| GET | `/v1/stays/hotels/:id` | Hotel photos, facilities, description, check-in rules, and review highlights |
-| POST | `/v1/stays/bookings` | Prebook and book a hotel `offer_id` within `max_total` (sandbox) |
-| GET | `/v1/bookings/stay/:id` | Get hotel booking status |
-| GET | `/demo` | MIP-003 sample input and output |
-| GET | `/demo-ui` | Buyer demo page: pay, search, verify |
-| POST | `/v1/demo/simulate-payment` | Rehearsal only: fund the simulated escrow |
-| POST | `/v1/trips/search` | Search flights and hotels in parallel |
-| GET | `/v1/bookings/flight/:id` | Get flight booking status |
-| GET | `/v1/operations/:id` | Inspect the local booking journal |
+| **POST** | **`/v1/flights/bookings`** | **Book a flight (Duffel)** |
+| GET | `/v1/bookings/flight/:id` | Flight booking status |
+| POST | `/v1/stays/search` | Hotel rates by city or coordinates, with board, cancellation terms and totals |
+| GET | `/v1/stays/hotels/:id` | Photos, facilities, description, check-in rules, review highlights |
+| **POST** | **`/v1/stays/bookings`** | **Prebook and book a hotel offer within `max_total`** |
+| GET | `/v1/bookings/stay/:id` | Hotel booking status |
+| GET | `/v1/operations/:id` | Inspect the booking journal |
+| GET | `/demo`, `/demo-ui` | MIP-003 sample and buyer demo page |
 
-Supplier response bodies remain in `data`; the API adds `provider`, `environment`, and `observed_at`.
+Full schemas: `/docs` or [docs/openapi.json](docs/openapi.json). Set `API_KEY` before public use and send `Authorization: Bearer <key>`.
 
-## Booking
+### Booking safety
 
-Every booking request needs an `Idempotency-Key` header, `confirm: true`, and a `max_total` amount and currency. Refresh the selected offer or quote first. Use the passenger IDs from the flight offer. The OpenAPI schema contains each required field.
+Each booking request needs an `Idempotency-Key` header, `confirm: true`, and `max_total` with currency. Refresh the offer first, and use the passenger IDs from the flight offer.
 
-A booking is saved to SQLite before supplier submission. A successful repeated request with the same key and body returns the saved result. A changed body with the same key is rejected. An uncertain request requires inspection through `/v1/operations/:id` and the supplier status route. Creating a new key after a timeout can create a second booking. The journal does not prove that a supplier creates an order exactly once.
+The request is saved to SQLite before it goes to the supplier. A repeat with the same key and body returns the saved result. A changed body with the same key is rejected. After a timeout, inspect `/v1/operations/:id` and the supplier status route before retrying: a new key can create a second booking. The journal does not prove a supplier creates an order exactly once.
 
-`LIVE_BOOKINGS_ALLOWED=false` blocks production Duffel bookings. Test Duffel orders remain available. Hotel bookings use the LiteAPI sandbox key; a live key needs `LIVE_BOOKINGS_ALLOWED=true`.
+Flights (Duffel) are switched off unless `FLIGHTS_ENABLED=true`; the chat agent never searches flights. `LIVE_BOOKINGS_ALLOWED=false` blocks production Duffel bookings. A live LiteAPI key needs `LIVE_BOOKINGS_ALLOWED=true`.
 
-## Verification
+## Status
+
+| Capability | Provider | Evidence |
+| --- | --- | --- |
+| Flight search and offer refresh | Duffel | Verified with the supplier test API |
+| Flight booking | Duffel | Verified test order and duplicate request replay |
+| Hotel search with room rates | LiteAPI (Nuitee) | Verified against the supplier sandbox |
+| Hotel booking | LiteAPI | Verified with a sandbox booking, budget cap and idempotent replay |
+| Buyer demo, buyer agent, smoke test | This repo | `/demo-ui`, `npm run demo:buy`, `npm run smoke` |
+| Sokosumi coworker | Sokosumi | Execution rehearsals complete; event approval pending |
+| Paid search on Cardano | Masumi MIP-003, MPS V2 | Protocol tests pass; registration pending, so no on-chain receipt yet |
+
+**Limits.** Supplier data comes from sandbox inventory. It does not prove production airline pricing, ticket issuance or hotel availability. Until Masumi registration confirms, settlement is simulated and labelled as such. No production booking or crypto transfer was made.
+
+## Stack
+
+Node.js 24+, TypeScript, Fastify, SQLite booking journal, Neon PostgreSQL in the hosted deployment, Vercel hosting.
+
+## Verify
 
 ```sh
-npm run check
-npm test
-npm run build
+npm run check && npm test && npm run build
 npm run openapi
-npm run verify:live
-npm run verify:live -- --book-test
+npm run verify:live                # supplier checks, saved privately to .data/verification.json
+npm run verify:live -- --book-test # creates a Duffel test order; refuses a live token
 ```
 
-The last command creates a Duffel test order with synthetic passenger details. It refuses a live token. The supplier verification script saves a private record in `.data/verification.json`. It never creates a real hotel booking or pays crypto.
+## More
 
-For a demo without credentials, use `npm run demo`. Search results and bookings are explicitly simulated. Live mode returns configuration errors when a supplier is unavailable and does not substitute demo inventory.
-
-See [feasibility and crypto payments](docs/feasibility.md) and [Masumi setup](docs/masumi.md) for the remaining access and payment steps.
+- [Demo runbook](docs/demo.md)
+- [Deployment and Masumi registration](docs/deployment.md)
+- [Sokosumi worker and judge access](docs/sokosumi.md)
+- [Masumi setup](docs/masumi.md)
+- [Feasibility and crypto payments](docs/feasibility.md)
+- [Submission readiness](docs/submission-readiness.md)
