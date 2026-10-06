@@ -248,13 +248,14 @@ export async function bookHotel(deps: Deps, owner: string, intent: Extract<Inten
   if (intent.flight) notes.push('I do not book flights, so I only booked the hotel.');
   if (plan.booked) return bookedAnswer(plan, true, notes);
   if (plan.request.start <= today.toISOString().slice(0, 10)) throw new TaskInputError(`The dates in your last plan (${prettyDate(plan.request.start)}) are too close or already gone, so I cannot book it. Ask for a new plan, for example: "${exampleRequest(today)}".${ASK_AGAIN}`);
+  // The hotel agent opens a pay-at-property checkout and takes no guest details, so there is no name to ask for.
+  if (deps.travel.usesAdvisor) return await checkoutViaAdvisor(deps, owner, plan, notes);
   // The built-in guest is a placeholder. Never put a made-up person on a booking: ask whose name it should be.
   const placeholder = deps.config.GUEST_GIVEN_NAME === 'Alex' && deps.config.GUEST_FAMILY_NAME === 'Traveller';
   if (!intent.guest && placeholder) throw new TaskInputError(`Whose name should go on the hotel booking? Say, for example: "book the hotel under Anna Reyes". You can add an email too.${ASK_AGAIN}`);
   const given = intent.guest?.given_name ?? deps.config.GUEST_GIVEN_NAME, family = intent.guest?.family_name ?? deps.config.GUEST_FAMILY_NAME;
   const guest = { given_name: given, family_name: family, email: intent.guest?.email ?? deps.config.GUEST_EMAIL };
   const { request, hotel } = plan;
-  if (deps.travel.usesAdvisor) return await checkoutViaAdvisor(deps, owner, plan, notes);
   try {
     // Offers expire, so look up today's price for the same hotel, then book with a ceiling of the price we promised plus 10%.
     const fresh: any = await deps.travel.stays({ check_in_date: request.start, check_out_date: plan.end, rooms: [{ adults: request.travellers }], location: { city: request.destination.city, country_code: request.destination.country_code }, currency: plan.currency, guest_nationality: 'US', limit: 20 });
@@ -284,7 +285,7 @@ async function checkoutViaAdvisor(deps: Deps, owner: string, plan: Plan, notes: 
   if (!plan.checkout) {
     const result = await deps.travel.advisor.checkout({ destination: request.destination.city, check_in: request.start, check_out: plan.end, adults: request.travellers, property_id: hotel.id });
     if (!result.opened) {
-      return [`# I could not open the checkout for ${hotel.name}`, '', `The hotel agent said: ${result.failure_reason ?? 'no checkout was available.'} Nothing was booked and nothing was charged.`, '',
+      return [`# I could not open the checkout for ${hotel.name}`, '', `The hotel agent said: ${(result.failure_reason ?? 'no checkout was available').replace(/\.?$/, '.')} Nothing was booked and nothing was charged.`, '',
         hotel.url ? `You can still reserve it yourself on Hotels.com (free cancellation, pay at the property): ${hotel.url}` : 'You can search the same dates on Hotels.com.', ...(notes.length ? ['', ...notes] : []), ''].join('\n');
     }
     plan.checkout = { trip_id: result.trip_id, url: result.checkout_url }; await savePlan(deps, owner, plan);
