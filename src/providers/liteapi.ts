@@ -57,13 +57,18 @@ export class LiteApi {
   }
   async searchStays(input: StaySearch) {
     if (!this.config.LITEAPI_API_KEY) unavailable('LiteAPI', 'LITEAPI_API_KEY');
-    const where = 'city' in input.location
-      ? { cityName: input.location.city, countryCode: input.location.country_code }
-      : { latitude: input.location.latitude, longitude: input.location.longitude, radius: input.location.radius_m };
+    const where = input.hotel_ids?.length ? { hotelIds: input.hotel_ids }
+      : 'city' in input.location
+        ? { cityName: input.location.city, countryCode: input.location.country_code }
+        : { latitude: input.location.latitude, longitude: input.location.longitude, radius: input.location.radius_m };
+    // LiteAPI answers "no availability" (code 2001) with a 400. That is an empty result, not a failure.
     const response = await this.http.request('https://api.liteapi.travel/v3.0', '/hotels/rates', { 'X-API-Key': this.config.LITEAPI_API_KEY, Accept: 'application/json' }, {
       ...where, checkin: input.check_in_date, checkout: input.check_out_date,
       occupancies: input.rooms.map(r => ({ adults: r.adults, children: r.children_ages ?? [] })),
       currency: input.currency, guestNationality: input.guest_nationality, limit: input.limit, maxRatesPerHotel: 3,
+    }).catch(error => {
+      if (error instanceof ApiError && error.code === 'UPSTREAM_REJECTED' && (error.details as any)?.upstream_status === 400) return { data: [], hotels: [] };
+      throw error;
     });
     if (!Array.isArray(response?.data)) throw new ApiError(502, 'UPSTREAM_INVALID_RESPONSE', 'LiteAPI did not return hotel rates.');
     const details = new Map<string, any>((response.hotels ?? []).map((h: any) => [h.id, h]));

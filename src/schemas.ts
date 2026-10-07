@@ -27,6 +27,10 @@ export const staySearch = z.object({
   currency: currency.default('USD'),
   guest_nationality: z.string().regex(/^[A-Z]{2}$/).default('US'),
   limit: z.number().int().min(1).max(50).default(10),
+  // auto: LiteAPI (bookable, rated) when it has rooms, else the Expert Travel Advisor. Internal callers that leave this out keep the legacy source choice.
+  provider: z.enum(['auto', 'liteapi', 'advisor']).optional(),
+  // Re-price known hotels (LiteAPI only), for example to refresh an offer before booking.
+  hotel_ids: z.array(z.string().regex(/^[A-Za-z0-9_-]{1,40}$/)).min(1).max(20).optional(),
 }).strict().refine(v => v.check_out_date > v.check_in_date, 'Check-out must be after check-in.');
 const phone = z.string().regex(/^\+[1-9]\d{6,14}$/);
 const person = z.object({ given_name: text, family_name: text }).strict();

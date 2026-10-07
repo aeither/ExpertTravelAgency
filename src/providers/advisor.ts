@@ -63,9 +63,15 @@ export class Advisor {
     try {
       const result = await this.post('/hotels/book', { destination: input.destination, check_in: input.check_in, check_out: input.check_out, adults: input.adults, payment_type: 'PAY_LATER', lodging: input.lodging ?? '', property_id: input.property_id });
       const c = result.checkout ?? {};
-      return { opened: !!(c.checkout_url || c.trip_id), trip_id: c.trip_id ?? null, checkout_url: c.checkout_url ?? null, total: c.total ?? null, failure_reason: c.failure_reason ?? null };
+      const opened = !!(c.checkout_url || c.trip_id);
+      if (opened) return { opened, link_only: false, trip_id: c.trip_id ?? null, checkout_url: c.checkout_url ?? null, total: c.total ?? null, failure_reason: c.failure_reason ?? null };
+      // The deployed advisor reports a failed checkout at the top level and still returns the pre-filled hotel page. That page is a link, not a checkout.
+      const page = (result.stays ?? []).find((s: any) => String(s.property_id) === input.property_id)?.url ?? result.stays?.[0]?.url;
+      const link = typeof page === 'string' && page.startsWith('https://') ? page : null;
+      const reason = c.failure_reason ?? (typeof result.checkout_error === 'string' ? result.checkout_error : null);
+      return { opened: false, link_only: !!link, trip_id: null, checkout_url: link, total: null, failure_reason: reason };
     } catch (error: any) {
-      return { opened: false, trip_id: null, checkout_url: null, total: null, failure_reason: String(error?.message ?? 'Checkout failed.') };
+      return { opened: false, link_only: false, trip_id: null, checkout_url: null, total: null, failure_reason: String(error?.message ?? 'Checkout failed.') };
     }
   }
 }

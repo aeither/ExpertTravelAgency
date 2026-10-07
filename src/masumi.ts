@@ -5,20 +5,41 @@ import { ApiError, unavailable } from './errors.js';
 import { HttpClient } from './http.js';
 import { sha256, type Storage } from './store.js';
 import { tripSearch } from './schemas.js';
+import { auditRequestSchema } from './auditor.js';
 import { Travel } from './travel.js';
 
+const knowledgeRequest = z.object({ destination: z.string().min(2).max(80), question: z.string().min(3).max(300).optional() }).strict();
+// Exactly one service per job. The key that is present says which service the buyer is hiring.
 export const startJobSchema = z.object({
   identifier_from_purchaser: z.string().regex(/^[a-f0-9]{14,26}$/),
-  input_data: z.object({ trip_request_json: z.string().min(2).max(16000) }).strict(),
+  input_data: z.union([
+    z.object({ trip_request_json: z.string().min(2).max(16000) }).strict(),
+    z.object({ knowledge_request_json: z.string().min(2).max(2000) }).strict(),
+    z.object({ audit_request_json: z.string().min(2).max(40000) }).strict(),
+  ]),
 }).strict();
-export const masumiInputHash = (input: { trip_request_json: string }, nonce: string) => sha256(`${nonce};${JSON.stringify({ trip_request_json: input.trip_request_json })}`);
+export type Service = 'search' | 'knowledge' | 'audit';
+const SERVICE_KEY = { search: 'trip_request_json', knowledge: 'knowledge_request_json', audit: 'audit_request_json' } as const;
+export const serviceOf = (input: Record<string, string>): Service => (Object.keys(SERVICE_KEY) as Service[]).find(k => SERVICE_KEY[k] in input)!;
+// The hash binds the exact input object the buyer sent.
+export const masumiInputHash = (input: Record<string, string>, nonce: string) => sha256(`${nonce};${JSON.stringify(input)}`);
 export const masumiResultHash = (result: string, nonce: string) => sha256(`${nonce};${result}`);
 export const SIMULATED_AGENT = `simulated-${'0'.repeat(56)}`;
-export const inputSchema = { input_data: [{ id: 'trip_request_json', type: 'string', name: 'Travel search request', data: { description: 'JSON body for POST /v1/trips/search. Supplier prices use fiat currencies.' }, validations: [{ validation: 'min', value: '2' }, { validation: 'max', value: '16000' }] }] };
+const FIELDS = {
+  search: { id: 'trip_request_json', type: 'string', name: 'Travel search request', data: { description: 'JSON body for POST /v1/trips/search. Supplier prices use fiat currencies.' }, validations: [{ validation: 'min', value: '2' }, { validation: 'max', value: '16000' }] },
+  knowledge: { id: 'knowledge_request_json', type: 'string', name: 'Destination knowledge request', data: { description: 'JSON {"destination": string, "question"?: string}. Seasonal and practical facts, no prices. Use instead of trip_request_json.' }, validations: [{ validation: 'min', value: '2' }, { validation: 'max', value: '2000' }, { validation: 'optional', value: 'true' }] },
+  audit: { id: 'audit_request_json', type: 'string', name: 'Trip audit request', data: { description: 'JSON {"plan_text", "constraints", "evidence"}. Checks a draft plan against its evidence and returns a verdict. Use instead of trip_request_json.' }, validations: [{ validation: 'min', value: '2' }, { validation: 'max', value: '40000' }, { validation: 'optional', value: 'true' }] },
+};
+// The first offered service is the primary field; the others are optional alternatives.
+export const inputSchemaFor = (services: Service[]) => ({ input_data: services.map((k, i) => i === 0 ? { ...FIELDS[k], validations: FIELDS[k].validations.filter(v => v.validation !== 'optional') } : FIELDS[k]) });
+export const inputSchema = inputSchemaFor(['search', 'knowledge', 'audit']);
+export interface ServiceHandlers { knowledge?: (input: z.infer<typeof knowledgeRequest>) => Promise<unknown>; audit?: (input: unknown) => Promise<unknown> }
 
 export class Masumi {
   private active = new Set<string>();
-  constructor(private config: Config, private http: HttpClient, private store: Storage, private travel: Travel) {}
+  constructor(private config: Config, private http: HttpClient, private store: Storage, private travel: Travel, private handlers: ServiceHandlers = {}) {}
+  get services() { return this.config.SERVICES; }
+  private price(service: Service) { return service === 'knowledge' ? this.config.MASUMI_KNOWLEDGE_PRICE_ATOMIC : service === 'audit' ? this.config.MASUMI_AUDIT_PRICE_ATOMIC : this.config.MASUMI_PRICE_ATOMIC; }
   get simulated() { return this.config.MASUMI_MODE === 'simulated'; }
   get configured() { return this.simulated || (!!this.config.MASUMI_TOKEN && this.config.MASUMI_AGENT_IDENTIFIER.length >= 57); }
   private get agentId() { return this.simulated ? SIMULATED_AGENT : this.config.MASUMI_AGENT_IDENTIFIER; }
@@ -39,14 +60,28 @@ export class Masumi {
   }
   async start(input: z.infer<typeof startJobSchema>) {
     if (!this.configured) unavailable('Masumi Payment Service', 'MASUMI_TOKEN and MASUMI_AGENT_IDENTIFIER');
-    // Paid jobs cannot use synthetic travel data.
-    if (this.travel.isDemo) throw new ApiError(409, 'PAID_DEMO_DISABLED', 'Use TRAVEL_MODE=live for paid Masumi searches.');
-    let request;
-    try { request = tripSearch.parse(JSON.parse(input.input_data.trip_request_json)); }
-    catch { throw new ApiError(400, 'INVALID_TRIP_REQUEST', 'trip_request_json must contain a valid /v1/trips/search body.'); }
-    const needed = this.travel.capabilities();
-    if ((request.flights && !needed.flights.credentials_present) || (request.stays && !needed.stays.credentials_present)) {
-      throw new ApiError(503, 'SEARCH_PROVIDER_NOT_CONFIGURED', 'Configure each requested search provider before creating a paid job.');
+    const service = serviceOf(input.input_data as Record<string, string>);
+    if (!this.services.includes(service)) throw new ApiError(404, 'SERVICE_NOT_OFFERED', `This agent does not offer the ${service} service.`);
+    const raw = (input.input_data as Record<string, string>)[SERVICE_KEY[service]]!;
+    let request: any;
+    if (service === 'search') {
+      // Paid jobs cannot use synthetic travel data.
+      if (this.travel.isDemo) throw new ApiError(409, 'PAID_DEMO_DISABLED', 'Use TRAVEL_MODE=live for paid Masumi searches.');
+      try { request = tripSearch.parse(JSON.parse(raw)); }
+      catch { throw new ApiError(400, 'INVALID_TRIP_REQUEST', 'trip_request_json must contain a valid /v1/trips/search body.'); }
+      const needed = this.travel.capabilities();
+      if ((request.flights && !needed.flights.credentials_present) || (request.stays && !needed.stays.credentials_present)) {
+        throw new ApiError(503, 'SEARCH_PROVIDER_NOT_CONFIGURED', 'Configure each requested search provider before creating a paid job.');
+      }
+    } else if (service === 'knowledge') {
+      try { request = knowledgeRequest.parse(JSON.parse(raw)); }
+      catch { throw new ApiError(400, 'INVALID_KNOWLEDGE_REQUEST', 'knowledge_request_json must be {"destination": string, "question"?: string}.'); }
+      if (!this.handlers.knowledge) throw new ApiError(503, 'KNOWLEDGE_UNAVAILABLE', 'The knowledge desk is not configured.');
+    } else {
+      const parsed = auditRequestSchema.safeParse((() => { try { return JSON.parse(raw); } catch { return undefined; } })());
+      if (!parsed.success) throw new ApiError(400, 'INVALID_AUDIT_REQUEST', 'audit_request_json does not match the audit schema.');
+      request = parsed.data;
+      if (!this.handlers.audit) throw new ApiError(503, 'AUDIT_UNAVAILABLE', 'The auditor is not configured.');
     }
     const nonce = input.identifier_from_purchaser;
     const hash = masumiInputHash(input.input_data, nonce);
@@ -56,7 +91,7 @@ export class Masumi {
       if (!existing.response) throw new ApiError(409, 'PAYMENT_OUTCOME_UNKNOWN', 'Inspect the saved payment request before retrying.', { job_id: existing.id });
       return existing.response;
     }
-    const job: any = { id: randomUUID(), nonce, inputHash: hash, input: input.input_data, request, status: 'awaiting_payment', phase: 'terms_pending' };
+    const job: any = { id: randomUUID(), nonce, inputHash: hash, service, input: input.input_data, request, status: 'awaiting_payment', phase: 'terms_pending' };
     await this.store.saveJob(job);
     const now = Date.now(), minute = 60000;
     let payment: any;
@@ -64,13 +99,13 @@ export class Masumi {
       payment = await this.createPayment({
         network: 'Preprod', paymentSourceType: 'Web3CardanoV2', supportedPaymentSourceIndex: this.config.MASUMI_SUPPORTED_SOURCE_INDEX,
         agentIdentifier: this.agentId, inputHash: hash, identifierFromPurchaser: nonce,
-        RequestedFunds: [{ amount: this.config.MASUMI_PRICE_ATOMIC, unit: this.config.MASUMI_TOKEN_UNIT }],
+        RequestedFunds: [{ amount: this.price(service), unit: this.config.MASUMI_TOKEN_UNIT }],
         payByTime: new Date(now + 10 * minute).toISOString(), submitResultTime: new Date(now + 20 * minute).toISOString(),
         unlockTime: new Date(now + 36 * minute).toISOString(), externalDisputeUnlockTime: new Date(now + 52 * minute).toISOString(),
       });
       job.payment = payment;
       await this.store.saveJob(job);
-      this.validateTerms(payment, hash);
+      this.validateTerms(payment, hash, this.price(service));
     } catch (error) {
       job.phase = 'terms_require_inspection'; job.status = 'failed'; await this.store.saveJob(job); throw error;
     }
@@ -124,12 +159,12 @@ export class Masumi {
   private txFor(payment: any, state: string): string | null {
     return [payment.CurrentTransaction, ...(payment.TransactionHistory ?? [])].find(t => t?.newOnChainState === state && t.txHash)?.txHash ?? null;
   }
-  private validateTerms(p: any, hash: string) {
+  private validateTerms(p: any, hash: string, price: string) {
     const funds = p.RequestedFunds;
     const deadlines = [p.payByTime, p.submitResultTime, p.unlockTime, p.externalDisputeUnlockTime].map(Number);
     if (p.PaymentSource?.network !== 'Preprod' || p.PaymentSource?.paymentSourceType !== 'Web3CardanoV2' || p.agentIdentifier !== this.agentId || p.inputHash !== hash ||
       typeof p.blockchainIdentifier !== 'string' || !p.blockchainIdentifier || typeof p.SmartContractWallet?.walletVkey !== 'string' || !p.SmartContractWallet.walletVkey ||
-      !Array.isArray(funds) || funds.length !== 1 || funds[0].amount !== this.config.MASUMI_PRICE_ATOMIC || funds[0].unit !== this.config.MASUMI_TOKEN_UNIT ||
+      !Array.isArray(funds) || funds.length !== 1 || funds[0].amount !== price || funds[0].unit !== this.config.MASUMI_TOKEN_UNIT ||
       deadlines.some((d, i) => !Number.isFinite(d) || d <= Date.now() || (i > 0 && d <= deadlines[i - 1]))) {
       throw new ApiError(502, 'MASUMI_TERMS_MISMATCH', 'The payment terms do not match the configured Preprod search service.');
     }
@@ -160,6 +195,15 @@ export class Masumi {
       } finally { this.active.delete(job.id); }
     }
   }
+  private async run(job: any): Promise<string> {
+    const service: Service = job.service ?? 'search';
+    if (service === 'knowledge') return JSON.stringify(await this.handlers.knowledge!(job.request));
+    if (service === 'audit') return JSON.stringify(await this.handlers.audit!(job.request));
+    const result = await this.travel.trip(job.request);
+    // A partial supplier failure must not be sold as a completed paid search.
+    if (!result.complete) throw new ApiError(502, 'SEARCH_INCOMPLETE', 'The search was incomplete.');
+    return JSON.stringify(result);
+  }
   private async process(job: any) {
     if (!['waiting_payment', 'awaiting_result', 'submit_pending'].includes(job.phase)) {
       job.error = 'RESTART_REQUIRES_INSPECTION'; await this.store.saveJob(job); return;
@@ -177,10 +221,13 @@ export class Masumi {
     }
     if (Date.now() + this.config.UPSTREAM_TIMEOUT_MS + 30000 >= Number(job.payment.submitResultTime)) { job.status = 'failed'; job.phase = 'deadline_expired'; await this.store.saveJob(job); return; }
     job.phase = 'search_pending'; job.status = 'running'; await this.store.saveJob(job);
-    const result = await this.travel.trip(job.request);
-    // A partial supplier failure must not be sold as a completed paid search.
-    if (!result.complete) { job.phase = 'supplier_failed'; job.status = 'failed'; job.error = 'SEARCH_INCOMPLETE'; await this.store.saveJob(job); return; }
-    job.result = JSON.stringify(result); job.resultHash = masumiResultHash(job.result, job.nonce);
+    let produced: string;
+    try { produced = await this.run(job); }
+    catch (error: any) {
+      // Nothing is submitted for work that did not finish, so the buyer can request a refund.
+      job.phase = 'supplier_failed'; job.status = 'failed'; job.error = error?.code ?? 'SERVICE_FAILED'; await this.store.saveJob(job); return;
+    }
+    job.result = produced; job.resultHash = masumiResultHash(job.result, job.nonce);
     job.phase = 'submit_pending'; await this.store.saveJob(job);
     if (Date.now() >= Number(job.payment.submitResultTime)) { job.status = 'failed'; job.phase = 'deadline_expired'; await this.store.saveJob(job); return; }
     if (this.simulated) job.sim = { ...job.sim, resultHash: job.resultHash, resultTx: `sim-${randomBytes(16).toString('hex')}` };

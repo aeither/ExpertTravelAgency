@@ -41,6 +41,14 @@ const schema = z.object({
   MASUMI_AGENT_IDENTIFIER: z.string().default(''),
   MASUMI_SUPPORTED_SOURCE_INDEX: z.coerce.number().int().min(0).max(24).default(0),
   MASUMI_PRICE_ATOMIC: z.string().regex(/^[1-9]\d{0,18}$/).default('1000000'),
+  // Paid services offered through MIP-003 start_job: search (trip_request_json), knowledge (knowledge_request_json), audit (audit_request_json).
+  SERVICES: z.string().default('search,knowledge,audit').transform((v, ctx) => {
+    const list = v.split(',').map(x => x.trim()).filter(Boolean);
+    if (!list.length || list.some(x => !['search', 'knowledge', 'audit'].includes(x))) { ctx.addIssue({ code: 'custom', message: 'SERVICES must list search, knowledge and audit.' }); return z.NEVER; }
+    return [...new Set(list)] as ('search' | 'knowledge' | 'audit')[];
+  }),
+  MASUMI_KNOWLEDGE_PRICE_ATOMIC: z.string().regex(/^[1-9]\d{0,18}$/).default('500000'),
+  MASUMI_AUDIT_PRICE_ATOMIC: z.string().regex(/^[1-9]\d{0,18}$/).default('500000'),
   MASUMI_TOKEN_UNIT: z.string().regex(/^[a-f0-9]{56,150}$/).default('16a55b2a349361ff88c03788f93e1e966e5d689605d044fef722ddde0014df10745553444d'),
 });
 export type Config = z.infer<typeof schema>;

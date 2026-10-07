@@ -33,6 +33,24 @@ Buyer agent ──pays──▶ Escrow ──locks funds──▶ Origin ──p
 - **Money is guarded.** A booking fails if the offer exceeds `max_total`. A repeated request with the same key returns the saved result instead of booking twice.
 - **Honest labelling.** Every response carries `provider`, `environment` and `observed_at`. Demo data is marked `provider: demo`. Live mode never substitutes demo inventory.
 
+## Paid services (MIP-003)
+
+One registered seller identity offers three paid jobs through `POST /start_job`. The key in `input_data` picks the service; send exactly one. The input hash binds the exact `input_data` object to the purchaser nonce, and the result hash binds the result string.
+
+| Service | `input_data` key | Default price (test USDM) | Result |
+| --- | --- | --- | --- |
+| Search | `trip_request_json` (a `/v1/trips/search` body) | 1.0 (`MASUMI_PRICE_ATOMIC`) | Flights and hotels, as before |
+| Knowledge | `knowledge_request_json` = `{"destination", "question"?}` | 0.5 (`MASUMI_KNOWLEDGE_PRICE_ATOMIC`) | `{answer, destination, observed_at}` |
+| Audit | `audit_request_json` = `{plan_text, constraints, evidence}` | 0.5 (`MASUMI_AUDIT_PRICE_ATOMIC`) | `{verdict: pass or revise, checks, claims, rewrite_hints}` |
+
+`SERVICES` (comma list, default `search,knowledge,audit`) switches services on or off, so the same code can run as a separate Trip Auditor identity with `SERVICES=audit`. `/availability` lists the offered services and `/input_schema` marks the extra fields optional.
+
+The auditor checks a draft plan against the evidence its author collected: hotel names and prices must come from the search, the nightly budget must hold, travelling children must be stated, and (with a model key) named places must be grounded in the knowledge answer.
+
+## Hotel source
+
+`POST /v1/stays/search` takes `provider`: `auto` (default for API callers), `liteapi` or `advisor`. `auto` returns bookable LiteAPI sandbox rooms (with ratings, stars and kids in `rooms[].children_ages`) and falls back to the Expert Travel Advisor when LiteAPI has no rooms for the place. `hotel_ids` (LiteAPI only) re-prices known hotels, for example before booking. Book LiteAPI offers with `POST /v1/stays/bookings`. The Advisor checkout returns `link_only: true` with a pre-filled hotel page when it cannot open an offer; that page is not a reservation.
+
 ## Talk to it (Sokosumi)
 
 Create a task for the Expert Travel Agency coworker and write in plain words:

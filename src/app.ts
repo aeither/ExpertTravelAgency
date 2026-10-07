@@ -11,7 +11,9 @@ import { HttpClient, type Fetch } from './http.js';
 import { Store, type Storage } from './store.js';
 import { PostgresStore } from './postgres-store.js';
 import { Travel } from './travel.js';
-import { Masumi, inputSchema, startJobSchema } from './masumi.js';
+import { Masumi, inputSchemaFor, startJobSchema } from './masumi.js';
+import { auditPlan } from './auditor.js';
+import type { LanguageModel } from 'ai';
 import * as s from './schemas.js';
 import { demoHtml } from './demo-ui.js';
 import { withSearchExamples } from './openapi-examples.js';
@@ -20,15 +22,18 @@ import { journaledBooking } from './journal.js';
 import { coworkerHtml } from './coworker-ui.js';
 import { destinationKnowledge } from './knowledge.js';
 
-export async function buildApp(config: Config, options: { fetch?: Fetch; poll?: boolean; logger?: boolean } = {}) {
+export async function buildApp(config: Config, options: { fetch?: Fetch; poll?: boolean; logger?: boolean; model?: LanguageModel } = {}) {
   const app = Fastify({ logger: options.logger ? { redact: ['req.headers.authorization', 'req.headers.token'] } : false, bodyLimit: 128000 }).withTypeProvider<ZodTypeProvider>();
   app.setValidatorCompiler(validatorCompiler); app.setSerializerCompiler(serializerCompiler);
   const databaseUrl = config.DATABASE_URL_UNPOOLED || config.DATABASE_URL;
   const store: Storage = databaseUrl ? new PostgresStore(databaseUrl) : new Store(config.DATA_PATH);
   if (store instanceof PostgresStore) await store.initialize();
   const http = new HttpClient(config.UPSTREAM_TIMEOUT_MS, options.fetch);
-  const travel = new Travel(config, http);
-  const masumi = new Masumi(config, http, store, travel);
+  const travel = new Travel(config, http, options.fetch);
+  const masumi = new Masumi(config, http, store, travel, {
+    knowledge: input => destinationKnowledge(config, input, options.model),
+    audit: input => auditPlan(config, input, options.model),
+  });
   const sokosumi = new Sokosumi(config, store, travel);
   const isPublic = (path: string) => ['/health', '/availability', '/input_schema', '/demo', '/demo-ui', '/coworker', '/v1/sokosumi/tick', '/start_job', '/status', '/v1/demo/simulate-payment'].includes(path) ||
     (config.PUBLIC_SEARCH && (path === '/' || path.startsWith('/docs') || path === '/openapi.json' || path === '/v1/capabilities' || path.endsWith('/search') || path.startsWith('/v1/flights/offers/') || path.startsWith('/v1/stays/hotels/')));
@@ -77,7 +82,7 @@ export async function buildApp(config: Config, options: { fetch?: Fetch; poll?: 
   app.get('/openapi.json', { schema: { hide: true } }, async () => withSearchExamples(app.swagger()));
   app.post('/v1/flights/search', { schema: { ...tag('Flights', 'Search flight offers'), body: s.flightSearch } }, r => travel.flights(r.body));
   app.get('/v1/flights/offers/:id', { schema: { ...tag('Flights', 'Refresh a flight offer'), params: idParams } }, r => travel.offer(r.params.id));
-  app.post('/v1/stays/search', { schema: { ...tag('Stays', 'Search hotels with live room rates'), body: s.staySearch } }, r => travel.stays(r.body));
+  app.post('/v1/stays/search', { schema: { ...tag('Stays', 'Search hotels with live room rates'), body: s.staySearch } }, r => travel.stays({ ...r.body, provider: r.body.provider ?? 'auto' }));
   app.post('/v1/trips/search', { schema: { ...tag('Trips', 'Search travel categories in parallel'), body: s.tripSearch } }, r => travel.trip(r.body));
   const book = (kind: string, key: string, input: unknown, action: (id: string, submitted: () => Promise<void>) => Promise<unknown>) => journaledBooking(store, config, kind, key, input, action);
   app.post('/v1/flights/bookings', { schema: { ...tag('Flights', 'Book a refreshed flight offer'), headers: s.idempotencyHeaders, body: s.flightBooking } }, r => book('flight', r.headers['idempotency-key'], r.body, (id, submitted) => travel.bookFlight(r.body, id, submitted)));
@@ -88,14 +93,14 @@ export async function buildApp(config: Config, options: { fetch?: Fetch; poll?: 
   app.get('/v1/operations/:id', { schema: { ...tag('Bookings', 'Inspect a saved booking operation'), params: z.object({ id: z.uuid() }) } }, r => store.get(r.params.id));
   app.get('/v1/masumi/health', { schema: tag('Masumi', 'Check the configured payment node') }, () => masumi.health());
   // A simulated rail must never advertise itself to real buyers as payable.
-  app.get('/availability', { schema: tag('Masumi', 'Check paid search availability') }, async () => ({ status: masumi.configured && !masumi.simulated && !travel.isDemo ? 'available' : 'unavailable', type: 'masumi-agent', ...(masumi.simulated ? { message: 'Rehearsal mode: settlement is simulated and not payable.' } : {}) }));
+  app.get('/availability', { schema: tag('Masumi', 'Check paid search availability') }, async () => ({ status: masumi.configured && !masumi.simulated && !travel.isDemo ? 'available' : 'unavailable', type: 'masumi-agent', services: config.SERVICES, ...(masumi.simulated ? { message: 'Rehearsal mode: settlement is simulated and not payable.' } : {}) }));
   app.get('/demo', { schema: tag('Masumi', 'Sample input and output for marketplace previews') }, async () => ({
     input: { trip_request_json: JSON.stringify({ flights: { slices: [{ origin: 'SIN', destination: 'BKK', departure_date: '2026-12-01' }], passengers: [{ type: 'adult' }] }, stays: { check_in_date: '2026-12-01', check_out_date: '2026-12-04', rooms: [{ adults: 1 }], location: { city: 'Bangkok', country_code: 'TH' } } }) },
     output: { result: JSON.stringify({ complete: true, summary: { flights: { cheapest: { airline: 'Example Air', total: { amount: '95.00', currency: 'EUR' }, stops: 0 } }, hotels: { cheapest: { name: 'Example Hotel', total: { amount: '210.00', currency: 'USD' } } } }, note: 'Illustrative sample, not a live quote.' }) },
   }));
   app.get('/demo-ui', { schema: { hide: true } }, async (_request, reply) => reply.type('text/html; charset=utf-8').header('cache-control', 'no-store').send(demoHtml));
   app.post('/v1/demo/simulate-payment', { schema: { ...tag('Masumi', 'Rehearsal only: fund the simulated escrow for a job'), body: z.object({ job_id: z.uuid() }).strict() } }, r => masumi.simulatePayment(r.body.job_id));
-  app.get('/input_schema', { schema: tag('Masumi', 'Get the MIP-003 input schema') }, async () => inputSchema);
+  app.get('/input_schema', { schema: tag('Masumi', 'Get the MIP-003 input schema') }, async () => inputSchemaFor(config.SERVICES));
   app.post('/start_job', { schema: { ...tag('Masumi', 'Create a paid travel search job on Preprod'), body: startJobSchema } }, r => masumi.start(r.body));
   app.get('/status', { schema: { ...tag('Masumi', 'Get paid job status and result'), querystring: z.object({ job_id: z.uuid() }) } }, r => masumi.status(r.query.job_id, !!databaseUrl));
   let timer: ReturnType<typeof setInterval> | undefined;
