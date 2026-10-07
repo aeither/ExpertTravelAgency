@@ -42,6 +42,8 @@ Create a task for the Expert Travel Agency coworker and write in plain words:
 
 The agent assumes 1 traveller unless the message says otherwise (`Bangkok, 20 October, 4 days, 2 people`). To book under a name, add `under Maria Santos`. JSON trip requests still work. Flight booking is not available from chat yet. Cebu, Bangkok, Singapore, Bali and Manila have curated activities.
 
+The hotel search and hotel booking run on a separate coworker, the [Expert Travel Advisor](https://github.com/armsves/expert-travel-advisor-origins) (Hotels.com, pay at the property). Set `ADVISOR_URL` to its address and this agent uses it to find hotels and open the checkout instead of LiteAPI.
+
 ## Try it
 
 **In the browser:** open `/demo-ui`, pick Singapore → Bangkok, click **Hire the agent**. The page steps through signed terms, locked funds, search, result hash and buyer verification.
@@ -100,6 +102,7 @@ Flights (Duffel) are switched off unless `FLIGHTS_ENABLED=true`; the chat agent 
 | Flight booking | Duffel | Verified test order and duplicate request replay |
 | Hotel search with room rates | LiteAPI (Nuitee) | Verified against the supplier sandbox |
 | Hotel booking | LiteAPI | Verified with a sandbox booking, budget cap and idempotent replay |
+| Hotel search and hotel booking coworker | [Expert Travel Advisor](https://github.com/armsves/expert-travel-advisor-origins) | Set `ADVISOR_URL`; this agent calls it for hotel search and for opening the checkout |
 | Buyer demo, buyer agent, smoke test | This repo | `/demo-ui`, `npm run demo:buy`, `npm run smoke` |
 | Sokosumi coworker | Sokosumi | Execution rehearsals complete; event approval pending |
 | Paid search on Cardano | Masumi MIP-003, MPS V2 | Protocol tests pass; registration pending, so no on-chain receipt yet |

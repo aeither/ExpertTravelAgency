@@ -16,7 +16,12 @@ const detailText = (detail: unknown) => typeof detail === 'string' ? detail : Ar
 
 const LODGING = ['', 'APART_HOTEL'];
 
+// The agent searches, then saves its plan with the identical search a few seconds later. Answer that repeat from memory.
+// Kept short on purpose: the checkout step searches again later and must see fresh offers. Failures are never kept.
+const SEARCH_TTL_MS = 15000;
+
 export class Advisor {
+  private recent = new Map<string, { at: number; found: Promise<any> }>();
   constructor(private config: Config, private request: typeof fetch = fetch) {}
   get enabled() { return !!this.config.ADVISOR_URL; }
   private async post(path: string, body: unknown) {
@@ -25,11 +30,21 @@ export class Advisor {
     if (!response.ok) throw new ApiError(502, 'ADVISOR_FAILED', detailText(payload.detail) ?? `The hotel agent returned HTTP ${response.status}.`, undefined, response.status >= 500);
     return payload;
   }
+  private search(body: { destination: string; check_in: string; check_out: string; adults: number; lodging: string; payment_type: string }) {
+    const key = JSON.stringify(body), now = Date.now();
+    for (const [k, v] of this.recent) if (now - v.at > SEARCH_TTL_MS) this.recent.delete(k);
+    const hit = this.recent.get(key);
+    if (hit) return hit.found;
+    const found = this.post('/hotels/search', body);
+    this.recent.set(key, { at: now, found });
+    found.catch(() => { if (this.recent.get(key)?.found === found) this.recent.delete(key); });
+    return found;
+  }
   // The agent only opens a checkout for a stay found with the same lodging filter, and offers differ between filters.
   // So search both ways, and remember which filter found each stay.
   async searchStays(input: StaySearch) {
     const nights = Math.max(1, Math.round((Date.parse(input.check_out_date) - Date.parse(input.check_in_date)) / 86400000));
-    const search = (lodging: string) => this.post('/hotels/search', { destination: 'city' in input.location ? input.location.city : '', check_in: input.check_in_date, check_out: input.check_out_date, adults: input.rooms?.[0]?.adults ?? 2, payment_type: 'PAY_LATER', lodging });
+    const search = (lodging: string) => this.search({ destination: 'city' in input.location ? input.location.city : '', check_in: input.check_in_date, check_out: input.check_out_date, adults: input.rooms?.[0]?.adults ?? 2, payment_type: 'PAY_LATER', lodging });
     const settled = await Promise.allSettled(LODGING.map(search));
     const ok = settled.flatMap((r, i) => r.status === 'fulfilled' ? [{ lodging: LODGING[i]!, found: r.value }] : []);
     if (!ok.length) throw (settled[0] as PromiseRejectedResult).reason;

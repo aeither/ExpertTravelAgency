@@ -257,12 +257,15 @@ export async function openCheckout(deps: Deps, plan: Plan): Promise<{ opened: bo
 export interface Deps { travel: Travel; store: Storage; config: Config; charged?: boolean }
 const planKey = (owner: string) => `latest-plan:${owner}`;
 
+// The key holds the owner and the claim input is always { owner }, so an existing row can be used as is: one read instead of an insert attempt plus a read.
+const planOperation = async (deps: Deps, owner: string) => (await deps.store.find(planKey(owner))) ?? (await deps.store.claim('latest-plan', planKey(owner), { owner })).operation;
+
 export async function savePlan(deps: Deps, owner: string, plan: Plan) {
-  const op = (await deps.store.claim('latest-plan', planKey(owner), { owner })).operation;
+  const op = await planOperation(deps, owner);
   await deps.store.finish(op.id, 'ready', plan);
 }
 export async function loadPlan(deps: Deps, owner: string): Promise<{ id: string; plan?: Plan }> {
-  const op = (await deps.store.claim('latest-plan', planKey(owner), { owner })).operation;
+  const op = await planOperation(deps, owner);
   return { id: op.id, plan: op.state === 'ready' ? op.response : undefined };
 }
 

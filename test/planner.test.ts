@@ -195,3 +195,16 @@ test('checkout sends the exact body the hotel agent documents, and a 400 names t
   const bad = new Advisor(config, (async () => Response.json({ detail: [{ loc: ['body', 'lodging'], msg: 'Field required' }] }, { status: 400 })) as typeof fetch);
   assert.match((await bad.checkout({ destination: 'x', check_in: 'a', check_out: 'b', adults: 1, property_id: '1' })).failure_reason!, /lodging: Field required/);
 });
+
+test('advisor: the same search seconds apart is answered once; other dates and failures are not served from memory', async () => {
+  const config = advisorConfig({ ADVISOR_URL: 'https://advisor.test', FLIGHTS_ENABLED: 'false' });
+  let calls = 0, fail = false;
+  const request = (async (_url: string, options: any) => { calls++; if (fail) return Response.json({ detail: 'down' }, { status: 500 }); const b = JSON.parse(options.body); return Response.json({ stays: [{ property_id: b.check_in, name: 'Hotel', price: '$50', free_cancellation: true }] }); }) as unknown as typeof fetch;
+  const advisor = new Advisor(config, request);
+  const search = (check_in_date: string) => advisor.searchStays({ check_in_date, check_out_date: '2026-10-22', rooms: [{ adults: 1 }], location: { city: 'Cebu', country_code: 'PH' } } as any);
+  const first = await search('2026-10-20'); const again = await search('2026-10-20');
+  assert.equal(calls, 2); assert.deepEqual(again, first);   // two lodging filters, searched once
+  await search('2026-10-21'); assert.equal(calls, 4);        // different dates go upstream
+  fail = true; await assert.rejects(search('2026-10-25')); const failed = calls;
+  fail = false; await search('2026-10-25'); assert.ok(calls > failed); // a failure is never remembered
+});

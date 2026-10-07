@@ -11,6 +11,8 @@ import { PaidFlow, proofBlock, collectionComment } from './sokosumi-paid.js';
 // One bounded invocation per request; persistent journal + Postgres session lock.
 export class Sokosumi {
   private active = new Set<string>();
+  // Tasks whose saved state is final. They stay listed by Sokosumi forever, so skip them without a database round trip.
+  private finished = new Set<string>();
   constructor(private config: Config, private store: Storage, private travel: Travel, private request: typeof fetch = fetch, private model?: LanguageModel) {}
   get configured() { return !!this.config.SOKOSUMI_COWORKER_ID && this.config.SOKOSUMI_COWORKER_API_KEY.startsWith('coworker_'); }
   private async api(path: string, body?: unknown, ownerId?: string) {
@@ -19,9 +21,11 @@ export class Sokosumi {
       headers: { Authorization: `Bearer ${this.config.SOKOSUMI_COWORKER_API_KEY}`, 'Content-Type': 'application/json', ...(ownerId ? { 'X-Context-User-Id': ownerId } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
-    const payload: any = await response.json();
+    // A gateway error can arrive as HTML: report the status instead of a JSON parse error.
+    const payload: any = await response.json().catch(() => undefined);
+    if (payload === undefined && response.ok) throw new ApiError(502, 'SOKOSUMI_ACCESS_ERROR', 'Sokosumi returned an invalid response. Inspect the same task before retrying.');
     if (!response.ok) {
-      const kind = ['grant_required', 'grant_denied', 'grant_revoked'].includes(payload.kind) ? payload.kind : 'request_failed';
+      const kind = ['grant_required', 'grant_denied', 'grant_revoked'].includes(payload?.kind) ? payload.kind : 'request_failed';
       throw new ApiError(502, 'SOKOSUMI_ACCESS_ERROR', `Sokosumi returned HTTP ${response.status}: ${kind}. Inspect the same task before retrying.`);
     }
     return payload;
@@ -71,6 +75,7 @@ export class Sokosumi {
   }
   private async advance(task: any) {
     const lockId = `sokosumi:${task.id}`;
+    if (this.finished.has(task.id)) return 'skipped';
     if (this.active.has(lockId)) return 'busy';
     this.active.add(lockId);
     let outcome = 'busy';
@@ -100,6 +105,7 @@ export class Sokosumi {
           } else outcome = 'waiting';
           return;
         }
+        if (state.phase === 'completed') { if (this.finished.size >= 5000) this.finished.clear(); this.finished.add(task.id); }
         if (state.phase === 'completed' || state.phase === 'blocked') { outcome = 'skipped'; return; }
         if (task.status === 'COMPLETED') {
           if (state.phase !== 'complete-pending') { outcome = 'skipped'; return; }

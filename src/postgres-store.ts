@@ -5,11 +5,16 @@ import { canonical, sha256, type Storage, type Operation } from './store.js';
 
 export class PostgresStore implements Storage {
   private pool: Pool;
-  constructor(url: string) { this.pool = new Pool({ connectionString: url, max: 5, connectionTimeoutMillis: 10000, idleTimeoutMillis: 10000 }); }
+  constructor(url: string) {
+    this.pool = new Pool({ connectionString: url, max: 5, connectionTimeoutMillis: 10000, idleTimeoutMillis: 10000 });
+    // A dropped idle connection emits 'error' on the pool; without a listener that crashes the process. The pool replaces the client by itself.
+    this.pool.on('error', error => console.error('postgres idle client error:', String((error as Error)?.message ?? error).slice(0, 200)));
+  }
   async initialize() {
     await this.pool.query(`CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, key TEXT UNIQUE NOT NULL, hash TEXT NOT NULL, kind TEXT NOT NULL, state TEXT NOT NULL, response JSONB, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, nonce TEXT UNIQUE NOT NULL, input_hash TEXT NOT NULL, data JSONB NOT NULL);
-      CREATE TABLE IF NOT EXISTS supplier_credentials (name TEXT PRIMARY KEY, data JSONB NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS supplier_credentials (name TEXT PRIMARY KEY, data JSONB NOT NULL);
+      CREATE INDEX IF NOT EXISTS jobs_pending_idx ON jobs (id) WHERE data->>'status' NOT IN ('completed','failed');`);
   }
   async claim(kind: string, key: string, input: unknown) {
     const hash = sha256(canonical(input));

@@ -101,7 +101,8 @@ export async function buildApp(config: Config, options: { fetch?: Fetch; poll?: 
   let timer: ReturnType<typeof setInterval> | undefined;
   let ticking: Promise<void> | undefined;
   if (options.poll !== false && masumi.configured) {
-    timer = setInterval(() => { if (!ticking) ticking = masumi.tick().finally(() => { ticking = undefined; }); }, 5000);
+    // A failed tick (database or node unreachable) is retried on the next interval; it must never become an unhandled rejection.
+    timer = setInterval(() => { if (!ticking) ticking = masumi.tick().catch(e => app.log.error({ err: e?.code ?? 'TICK_FAILED' }, 'masumi tick failed')).finally(() => { ticking = undefined; }); }, 5000);
     timer.unref();
   }
   // A long-running host (laptop or Railway) can poll Sokosumi itself; serverless hosts are driven by /v1/sokosumi/tick instead.

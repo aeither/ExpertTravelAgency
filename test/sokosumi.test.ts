@@ -266,3 +266,26 @@ test('agent: a confirmed booking opens the checkout first, charges once, and han
     assert.equal(calls.filter(c => c === '/payment').length, 1); assert.deepEqual(f.checkouts, ['h1']);
   } finally { store.close(); }
 });
+
+test('a finished task is not looked up again on later ticks of the same runner', async () => {
+  const store = new Store(':memory:'); const f = fixture();
+  let finds = 0; const find = store.find.bind(store); store.find = (key: string) => { finds++; return find(key); };
+  try {
+    const runner = new Sokosumi(config, store, f.travel, f.request);
+    assert.equal((await runner.tick()).status, 'completed');
+    assert.equal((await runner.tick()).status, 'idle');
+    const settled = finds;
+    assert.equal((await runner.tick()).status, 'idle');
+    assert.equal(finds, settled);
+    assert.equal(f.searches(), 1);
+  } finally { store.close(); }
+});
+test('a gateway error that is not JSON still reports the HTTP status', async () => {
+  const store = new Store(':memory:'); const f = fixture();
+  const html = (async () => new Response('<html>Bad gateway</html>', { status: 502 })) as typeof fetch;
+  try {
+    await assert.rejects(new Sokosumi(config, store, f.travel, html).tick(), (error: any) => error.code === 'SOKOSUMI_ACCESS_ERROR' && /HTTP 502/.test(error.message));
+    const garbled = (async () => new Response('not json', { status: 200 })) as typeof fetch;
+    await assert.rejects(new Sokosumi(config, store, f.travel, garbled).tick(), (error: any) => error.code === 'SOKOSUMI_ACCESS_ERROR');
+  } finally { store.close(); }
+});
