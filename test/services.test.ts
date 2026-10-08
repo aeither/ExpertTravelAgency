@@ -188,3 +188,9 @@ test('auditor model pass flags ungrounded places and degrades to rules on failur
 test('auditor input is validated and bounded', async () => {
   await assert.rejects(auditPlan(getConfig({}), { plan_text: '', constraints: { nights: 1, adults: 1 }, evidence: { hotels: [] } } as any));
 });
+
+test('bold field labels such as "Hotel total:" are not read as hotel names', async () => {
+  const text = '## Top Pick\n**Fili Hotel Cebu**\n- **Hotel total:** 300 USD\n- **Nightly price:** 150 USD\n- **Rating:** 8.6\n- **Free cancellation:** Yes\nParty: 2 adults, 2 nights.';
+  const r = await auditPlan(getConfig({}), request({ plan_text: text }));
+  assert.equal(r.checks.hotels_known, true, JSON.stringify(r.claims.filter(c => c.status !== 'supported')));
+});

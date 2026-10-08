@@ -43,7 +43,8 @@ function moneyFigures(text: string, currency: string): number[] {
 // Hotel names the plan puts in bold, or after "pick", "alternative", "stay at".
 function namedHotels(text: string): string[] {
   const found = new Set<string>();
-  for (const m of text.matchAll(/\*\*([^*\n]{3,80})\*\*/g)) found.add(m[1]!.trim());
+  // A bold "Label:" (Hotel total:, Rating:, Free cancellation:) names a field, not a hotel.
+  for (const m of text.matchAll(/\*\*([^*\n]{3,80})\*\*/g)) { const name = m[1]!.trim(); if (!name.endsWith(':')) found.add(name); }
   for (const m of text.matchAll(/(?:top pick|alternatives?|stay at|stay in|book(?:ing)?|option)\s*[:\-]?\s*(?:\*\*)?([A-Z][\p{L}\p{N}'&.\- ]{2,70}?)(?:\*\*|,|\.|\s[—–-]\s|\s\(|\sfor\s|\sat\s|$|\n)/gmu)) found.add(m[1]!.trim());
   return [...found];
 }
