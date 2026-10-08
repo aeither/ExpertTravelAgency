@@ -194,3 +194,10 @@ test('bold field labels such as "Hotel total:" are not read as hotel names', asy
   const r = await auditPlan(getConfig({}), request({ plan_text: text }));
   assert.equal(r.checks.hotels_known, true, JSON.stringify(r.claims.filter(c => c.status !== 'supported')));
 });
+
+test('a price the knowledge desk itself states is supported when the plan quotes it', async () => {
+  const r = await auditPlan(getConfig({}), request({
+    plan_text: 'Top pick: **Fili Hotel Cebu**, 330 USD total for 3 nights (110 USD per night). Party: 2 adults and 2 children (6, 9). Mid-range spending runs 120 USD per day.',
+    evidence: { hotels: [{ name: 'Fili Hotel Cebu', total: 330, nightly: 110, currency: 'USD' }], knowledge: ['Typical daily cost: budget $30-50, mid-range $70-120, luxury $200+.'] } }));
+  assert.equal(r.checks.prices_match, true, JSON.stringify(r.claims.filter(c => c.status === 'unsupported')));
+});

@@ -83,6 +83,9 @@ export function auditRules(request: AuditRequest) {
   // Totals for the party (e.g. flights x travellers, sum of hotel + flights) are derived, so allow sums of two evidence totals.
   const totals = known.map(h => h.total).concat((evidence.flights ?? []).flatMap(f => f.total ? [f.total] : []));
   for (const a of totals) for (const b of totals) add(a + b);
+  // Figures the knowledge desk states itself (daily costs, ranges) are evidence too.
+  for (const text of evidence.knowledge ?? []) for (const n of moneyFigures(text, constraints.currency ?? 'USD')) add(n);
+  for (const text of evidence.knowledge ?? []) for (const m of text.matchAll(/[-–]\s?(?:US)?\$?\s?(\d[\d,]*(?:\.\d+)?)/g)) { const n = Number(m[1]!.replace(/,/g, '')); if (Number.isFinite(n) && n > 0) add(n); }
   let pricesMatch = true;
   for (const figure of new Set(moneyFigures(plan_text, constraints.currency ?? 'USD'))) {
     const ok = [...allowed].some(a => Math.abs(a - figure) <= Math.max(1, a * 0.005));
